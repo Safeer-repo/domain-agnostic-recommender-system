@@ -26,7 +26,7 @@ This project implements a domain-agnostic recommender system capable of providin
 
 ### API
 
-Start the API server:python src/api/app.py
+Start the API server: python src/api/app.py
 
 The API will be available at http://localhost:8000
 
