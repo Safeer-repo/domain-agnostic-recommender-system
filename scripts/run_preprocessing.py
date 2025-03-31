@@ -5,15 +5,14 @@ Usage: python scripts/run_preprocessing.py --domain DOMAIN --dataset DATASET [--
 """
 
 import os
+import sys
 import argparse
 import logging
-import sys
 
 # Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
-from src.utils.config import load_config
-from src.utils.logging_utils import setup_logging
 from src.preprocessing.preprocessing_pipeline import PreprocessingPipeline
 
 def main():
@@ -23,22 +22,47 @@ def main():
                         required=True, help="Domain to preprocess data for")
     parser.add_argument("--dataset", required=True, help="Dataset name to preprocess")
     parser.add_argument("--force", action="store_true", help="Force reprocessing even if processed data exists")
+    parser.add_argument("--min-ratings", type=int, default=10, help="Minimum number of ratings per item to keep")
+    parser.add_argument("--test-size", type=float, default=0.2, help="Fraction of data to use for testing")
     args = parser.parse_args()
     
-    # Load configuration
-    config = load_config()
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()]
+    )
     
-    # Setup logging
-    logger = setup_logging(config, f"preprocess_{args.domain}_{args.dataset}.log")
-    
-    logger.info(f"Starting preprocessing for {args.domain}/{args.dataset}")
+    # Get absolute path to the data directory
+    data_dir = os.path.join(project_root, "data")
     
     # Create and run the preprocessing pipeline
-    pipeline = PreprocessingPipeline(config)
-    processed_data = pipeline.preprocess(args.domain, args.dataset, force_reprocess=args.force)
+    pipeline = PreprocessingPipeline(
+        data_dir=data_dir,
+        min_ratings=args.min_ratings,
+        test_size=args.test_size
+    )
     
-    logger.info(f"Preprocessing complete: {processed_data.shape[0]} rows, {processed_data.shape[1]} columns")
-    logger.info(f"Sample data:\n{processed_data.head()}")
+    try:
+        train_data, test_data = pipeline.preprocess(
+            domain=args.domain,
+            dataset_name=args.dataset,
+            force_reprocess=args.force
+        )
+        
+        logging.info(f"Preprocessing complete")
+        logging.info(f"Train data shape: {train_data.shape}")
+        logging.info(f"Test data shape: {test_data.shape}")
+        
+        if 'rating' in train_data.columns:
+            logging.info(f"Train data rating stats:")
+            logging.info(f"  Mean: {train_data['rating'].mean():.2f}")
+            logging.info(f"  Min: {train_data['rating'].min()}")
+            logging.info(f"  Max: {train_data['rating'].max()}")
+        
+    except Exception as e:
+        logging.error(f"Error during preprocessing: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
