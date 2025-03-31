@@ -13,11 +13,7 @@ import io
 import shutil
 import sys
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from src.utils.config import load_config
-
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -55,36 +51,26 @@ def download_and_extract(url, extract_dir):
     
     logger.info(f"Extraction complete: {extract_dir}")
 
-def download_movielens(config):
+def download_movielens(data_dir):
     """Download MovieLens dataset."""
-    domain_dir = os.path.join(config.data_dir, "raw", "entertainment", "movielens")
+    domain_dir = os.path.join(data_dir, "raw", "entertainment", "movielens")
     
-    # MovieLens 100K
-    url = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
+    # MovieLens 32M - Note: This is a large dataset (239 MB)
+    url = "https://files.grouplens.org/datasets/movielens/ml-32m.zip"
     
+    logger.info(f"Downloading MovieLens 32M dataset. This is a large file (239 MB) and may take some time...")
     download_and_extract(url, domain_dir)
-    
-    # Move files from subdirectory to the main domain directory
-    extracted_dir = os.path.join(domain_dir, "ml-100k")
-    if os.path.exists(extracted_dir):
-        for item in os.listdir(extracted_dir):
-            src = os.path.join(extracted_dir, item)
-            dst = os.path.join(domain_dir, item)
-            shutil.move(src, dst)
-        
-        # Remove the now-empty directory
-        os.rmdir(extracted_dir)
     
     logger.info("MovieLens dataset download complete")
 
-def download_amazon(config):
+def download_amazon(data_dir):
     """Download Amazon Electronics dataset."""
     # Note: This is a placeholder. The actual Amazon Electronics dataset
     # may be too large or require different download methods.
     logger.info("Amazon Electronics dataset download would be implemented here")
     logger.info("Please manually download from https://jmcauley.ucsd.edu/data/amazon/")
 
-def download_open_university(config):
+def download_open_university(data_dir):
     """Download Open University Learning Analytics dataset."""
     # This is a placeholder. The actual download may vary.
     logger.info("Open University dataset download would be implemented here")
@@ -95,18 +81,21 @@ def main():
     parser = argparse.ArgumentParser(description="Download datasets for the recommender system")
     parser.add_argument("--domain", choices=["all", "entertainment", "ecommerce", "education"],
                         default="all", help="Domain to download datasets for")
+    parser.add_argument("--data-dir", default="./data", 
+                        help="Path to the data directory (default: ./data)")
     args = parser.parse_args()
     
-    config = load_config()
+    data_dir = os.path.abspath(args.data_dir)
+    logger.info(f"Using data directory: {data_dir}")
     
     if args.domain in ["all", "entertainment"]:
-        download_movielens(config)
+        download_movielens(data_dir)
     
     if args.domain in ["all", "ecommerce"]:
-        download_amazon(config)
+        download_amazon(data_dir)
     
     if args.domain in ["all", "education"]:
-        download_open_university(config)
+        download_open_university(data_dir)
     
     logger.info("Dataset downloads complete")
 

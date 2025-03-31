@@ -3,17 +3,19 @@ import pandas as pd
 import logging
 from typing import Dict, Any, Optional
 
-from src.utils.config import Config
-
 logger = logging.getLogger(__name__)
 
 class DataLoader:
     """Handles loading datasets from different domains."""
     
-    def __init__(self, config: Config):
-        """Initialize with configuration."""
-        self.config = config
-        self.data_dir = config.data_dir
+    def __init__(self, data_dir: str):
+        """
+        Initialize with data directory path.
+        
+        Args:
+            data_dir: Path to the data directory
+        """
+        self.data_dir = data_dir
     
     def load_dataset(self, domain: str, dataset_name: str) -> pd.DataFrame:
         """
@@ -48,8 +50,8 @@ class DataLoader:
         Returns:
             DataFrame with user-movie interactions
         """
-        # For MovieLens 100K
-        ratings_path = os.path.join(data_path, "u.data")
+        # For MovieLens 32M, the ratings file is in the ml-32m subdirectory
+        ratings_path = os.path.join(data_path, "ml-32m", "ratings.csv")
         
         # Check if file exists
         if not os.path.exists(ratings_path):
@@ -58,13 +60,14 @@ class DataLoader:
         # Load ratings
         logger.info(f"Loading MovieLens ratings from {ratings_path}")
         
-        # MovieLens 100K format: user id | item id | rating | timestamp
-        ratings = pd.read_csv(
-            ratings_path, 
-            sep='\t', 
-            names=['user_id', 'item_id', 'rating', 'timestamp'],
-            engine='python'
-        )
+        # MovieLens 32M format: userId,movieId,rating,timestamp
+        ratings = pd.read_csv(ratings_path)
+        
+        # Standardize column names
+        ratings = ratings.rename(columns={
+            'userId': 'user_id',
+            'movieId': 'item_id'
+        })
         
         logger.info(f"Loaded {len(ratings)} MovieLens ratings")
         return ratings
