@@ -55,11 +55,30 @@ def download_movielens(data_dir):
     """Download MovieLens dataset."""
     domain_dir = os.path.join(data_dir, "raw", "entertainment", "movielens")
     
-    # MovieLens 32M - Note: This is a large dataset (239 MB)
-    url = "https://files.grouplens.org/datasets/movielens/ml-32m.zip"
+    # MovieLens 100K
+    url = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
     
-    logger.info(f"Downloading MovieLens 32M dataset. This is a large file (239 MB) and may take some time...")
     download_and_extract(url, domain_dir)
+    
+    # Move files from subdirectory to the main domain directory
+    extracted_dir = os.path.join(domain_dir, "ml-100k")
+    if os.path.exists(extracted_dir):
+        for item in os.listdir(extracted_dir):
+            src = os.path.join(extracted_dir, item)
+            dst = os.path.join(domain_dir, item)
+            if os.path.exists(dst):
+                if os.path.isdir(dst):
+                    shutil.rmtree(dst)
+                else:
+                    os.remove(dst)
+            shutil.move(src, dst)
+        
+        # Remove the now-empty directory
+        if os.path.exists(extracted_dir) and os.path.isdir(extracted_dir):
+            try:
+                os.rmdir(extracted_dir)
+            except:
+                logger.warning(f"Could not remove directory {extracted_dir} - it may not be empty")
     
     logger.info("MovieLens dataset download complete")
 

@@ -1,6 +1,8 @@
 import os
 import pandas as pd
+import numpy as np
 import logging
+import glob
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -50,27 +52,66 @@ class DataLoader:
         Returns:
             DataFrame with user-movie interactions
         """
-        # For MovieLens 32M, the ratings file is in the ml-32m subdirectory
-        ratings_path = os.path.join(data_path, "ml-32m", "ratings.csv")
+        # Check for MovieLens 100K format (u.data file)
+        ratings_path_100k = os.path.join(data_path, "u.data")
         
-        # Check if file exists
-        if not os.path.exists(ratings_path):
-            raise FileNotFoundError(f"MovieLens ratings file not found at {ratings_path}")
+        if os.path.exists(ratings_path_100k):
+            # Load MovieLens 100K format
+            logger.info(f"Loading MovieLens 100K ratings from {ratings_path_100k}")
+            
+            # MovieLens 100K format: user id | item id | rating | timestamp
+            ratings = pd.read_csv(
+                ratings_path_100k, 
+                sep='\t', 
+                names=['user_id', 'item_id', 'rating', 'timestamp'],
+                engine='python'
+            )
+            
+            logger.info(f"Loaded {len(ratings)} MovieLens ratings")
+            return ratings
         
-        # Load ratings
-        logger.info(f"Loading MovieLens ratings from {ratings_path}")
+        # Check for MovieLens 32M format (ml-32m/ratings.csv file)
+        ratings_path_32m = os.path.join(data_path, "ml-32m", "ratings.csv")
         
-        # MovieLens 32M format: userId,movieId,rating,timestamp
-        ratings = pd.read_csv(ratings_path)
+        if os.path.exists(ratings_path_32m):
+            logger.info(f"Loading MovieLens 32M ratings from {ratings_path_32m}")
+            
+            # MovieLens 32M format: userId,movieId,rating,timestamp
+            ratings = pd.read_csv(ratings_path_32m)
+            
+            # Standardize column names
+            if 'userId' in ratings.columns and 'movieId' in ratings.columns:
+                ratings = ratings.rename(columns={
+                    'userId': 'user_id',
+                    'movieId': 'item_id'
+                })
+            
+            logger.info(f"Loaded {len(ratings)} MovieLens ratings")
+            return ratings
         
-        # Standardize column names
-        ratings = ratings.rename(columns={
-            'userId': 'user_id',
-            'movieId': 'item_id'
-        })
+        # Try finding any ratings.csv file recursively
+        ratings_paths = glob.glob(os.path.join(data_path, "**/ratings.csv"), recursive=True)
         
-        logger.info(f"Loaded {len(ratings)} MovieLens ratings")
-        return ratings
+        if ratings_paths:
+            ratings_path = ratings_paths[0]
+            logger.info(f"Loading MovieLens ratings from {ratings_path}")
+            
+            # MovieLens newer format: userId,movieId,rating,timestamp
+            ratings = pd.read_csv(ratings_path)
+            
+            # Standardize column names
+            if 'userId' in ratings.columns and 'movieId' in ratings.columns:
+                ratings = ratings.rename(columns={
+                    'userId': 'user_id',
+                    'movieId': 'item_id'
+                })
+            
+            logger.info(f"Loaded {len(ratings)} MovieLens ratings")
+            return ratings
+        
+        # If none of the expected formats are found
+        raise FileNotFoundError(f"MovieLens ratings file not found in {data_path}. "
+                              f"Files available: {os.listdir(data_path)}")
     
     def _load_amazon(self, data_path: str) -> pd.DataFrame:
         """
