@@ -5,6 +5,10 @@ import json
 
 from src.models.base_model import BaseModel
 from src.models.algorithms.als_model import ALSModel
+from src.models.algorithms.svd_model import SVDModel
+from src.models.algorithms.lightfm_model import LightFMModel
+from src.models.algorithms.sar_model import SARModel
+from src.models.algorithms.baseline_model import BaselineModel  
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +32,12 @@ class ModelRegistry:
     def _register_default_models(self) -> None:
         """Register all available models."""
         self.register_model("als", ALSModel)
+        self.register_model("svd", SVDModel)
+        self.register_model("lightfm", LightFMModel)
+        self.register_model("sar", SARModel)
+        self.register_model("baseline", BaselineModel)  # Register Baseline model
         # Add additional models as they are implemented
         # self.register_model("ncf", NCFModel)
-        # self.register_model("svd", SVDModel)
     
     def register_model(self, model_id: str, model_class: Type[BaseModel]) -> None:
         """

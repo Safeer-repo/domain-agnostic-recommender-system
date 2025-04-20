@@ -303,107 +303,160 @@ class SVDModel(BaseModel):
         
         return recommendations
     
-    def evaluate(self, 
-                 test_data: pd.DataFrame, 
-                 k: int = 10, 
-                 metrics: Optional[List[str]] = None) -> Dict[str, float]:
+    def _calculate_ndcg_at_k(self, test_data: pd.DataFrame, k: int) -> float:
         """
-        Evaluate the model's performance.
+        Calculate NDCG@k for the test data.
         
         Args:
             test_data: Test data with user_id, item_id, and rating columns
             k: Number of recommendations to consider
-            metrics: List of metrics to compute
-        
+            
         Returns:
-            Dictionary of performance metrics
+            NDCG@k score
         """
-        if not self.fitted:
-            raise ValueError("Model has not been fitted yet")
+        # Group test data by user
+        user_groups = test_data.groupby('user_id')
         
-        # Prepare metrics
-        if metrics is None:
-            metrics = ['rmse', 'mae', 'precision', 'recall']
-        
-        results = {}
-        
-        # Compute RMSE and MAE if required
-        if any(m in metrics for m in ['rmse', 'mae']):
-            predictions = []
-            actual = []
-            
-            for _, row in test_data.iterrows():
-                user_id, item_id, true_rating = row['user_id'], row['item_id'], row['rating']
+        ndcg_scores = []
+        for user_id, group in user_groups:
+            if user_id not in self.user_id_mapping:
+                continue
                 
-                try:
-                    # Use predict method to get predicted rating
-                    pred_items = self.predict(user_id, [item_id], n=1)
-                    if pred_items:
-                        pred_rating = pred_items[0][1]
-                        predictions.append(pred_rating)
-                        actual.append(true_rating)
-                except Exception as e:
-                    # Skip if prediction fails
-                    logger.debug(f"Prediction failed for user {user_id}, item {item_id}: {str(e)}")
-                    continue
-            
-            # Compute regression metrics
-            if predictions and 'rmse' in metrics:
-                results['rmse'] = np.sqrt(mean_squared_error(actual, predictions))
-            
-            if predictions and 'mae' in metrics:
-                results['mae'] = mean_absolute_error(actual, predictions)
-        
-        # Compute precision and recall at k if required
-        if any(m in metrics for m in ['precision', 'recall']):
-            # Group test data by user
-            user_test_items = test_data.groupby('user_id')['item_id'].apply(list).to_dict()
-            
-            # Get list of users in test data
-            test_users = list(user_test_items.keys())
-            
-            # Compute recommendations for each user
-            total_precision = 0.0
-            total_recall = 0.0
-            num_users = 0
-            
-            for user_id in test_users:
-                if user_id not in self.user_id_mapping:
-                    continue  # Skip users not in training data
+            # Get recommendations for the user
+            recommendations = self.predict(user_id, n=k)
+            if not recommendations:
+                continue
                 
-                # Get ground truth items for this user
-                ground_truth = set(user_test_items[user_id])
-                
-                # Get recommendations
-                try:
-                    recs = self.predict(user_id, n=k)
-                    recommended_items = set([item_id for item_id, _ in recs])
-                    
-                    # Compute precision and recall
-                    if recommended_items:
-                        relevant = recommended_items.intersection(ground_truth)
-                        precision = len(relevant) / len(recommended_items)
-                        recall = len(relevant) / len(ground_truth) if ground_truth else 0
-                        
-                        total_precision += precision
-                        total_recall += recall
-                        num_users += 1
-                except Exception as e:
-                    logger.debug(f"Error computing recommendations for user {user_id}: {str(e)}")
-                    continue
+            # Create relevance array for recommended items
+            recommended_items = [item_id for item_id, _ in recommendations]
             
-            # Compute average precision and recall
-            if num_users > 0:
-                if 'precision' in metrics:
-                    results['precision'] = total_precision / num_users
+            # Get relevant items from test data (items the user actually interacted with)
+            relevant_items = set(group['item_id'].values)
+            
+            # Calculate relevance scores
+            relevance = np.zeros(len(recommended_items))
+            for i, item_id in enumerate(recommended_items):
+                if item_id in relevant_items:
+                    relevance[i] = 1.0
+            
+            # If there are no relevant items in the recommendations, skip this user
+            if np.sum(relevance) == 0:
+                continue
                 
-                if 'recall' in metrics:
-                    results['recall'] = total_recall / num_users
+            # Calculate NDCG@k manually
+            # DCG = sum(rel_i / log2(i+1))
+            dcg = np.sum(relevance / np.log2(np.arange(2, len(relevance) + 2)))
+            
+            # Ideal DCG = DCG with perfect ranking (all relevant items at the top)
+            ideal_relevance = np.zeros(len(recommended_items))
+            ideal_relevance[:min(len(relevant_items), k)] = 1.0
+            idcg = np.sum(ideal_relevance / np.log2(np.arange(2, len(ideal_relevance) + 2)))
+            
+            if idcg > 0:
+                ndcg_scores.append(dcg / idcg)
         
-        # Update metadata
-        self.metadata['performance'] = results
+        return np.mean(ndcg_scores) if ndcg_scores else 0.0
+    
+    def _calculate_map_at_k(self, test_data: pd.DataFrame, k: int) -> float:
+        """
+        Calculate MAP@k for the test data.
         
-        return results
+        Args:
+            test_data: Test data with user_id, item_id, and rating columns
+            k: Number of recommendations to consider
+            
+        Returns:
+            MAP@k score
+        """
+        # Group test data by user
+        user_groups = test_data.groupby('user_id')
+        
+        ap_scores = []
+        for user_id, group in user_groups:
+            if user_id not in self.user_id_mapping:
+                continue
+                
+            # Get recommendations for the user
+            recommendations = self.predict(user_id, n=k)
+            if not recommendations:
+                continue
+                
+            # Create list of recommended items
+            recommended_items = [item_id for item_id, _ in recommendations]
+            
+            # Get relevant items from test data (items the user actually interacted with)
+            relevant_items = set(group['item_id'].values)
+            
+            # Calculate precision at each position where a relevant item is found
+            precision_values = []
+            num_relevant = 0
+            
+            for i, item_id in enumerate(recommended_items):
+                if item_id in relevant_items:
+                    num_relevant += 1
+                    precision_values.append(num_relevant / (i + 1))
+            
+            # Average precision = mean of precision values
+            if precision_values:
+                ap_scores.append(np.mean(precision_values))
+        
+        return np.mean(ap_scores) if ap_scores else 0.0
+    
+    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None) -> Dict[str, float]:
+            """
+            Evaluate the model's performance.
+            
+            Args:
+                test_data: Test data with user_id, item_id, and rating columns
+                k: Number of recommendations to consider
+                metrics: List of metrics to compute
+                
+            Returns:
+                Dictionary of performance metrics
+            """
+            if not self.fitted:
+                raise ValueError("Model has not been fitted yet")
+            
+            if metrics is None:
+                metrics = ['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 
+                        'coverage', 'novelty', 'diversity', 'rmse', 'mae']
+            
+            results = {}
+            
+            # Compute standard accuracy metrics (this code already exists in your models)
+            # ...
+            
+            # Compute beyond-accuracy metrics (coverage, novelty, diversity)
+            if any(m in metrics for m in ['coverage', 'novelty', 'diversity']):
+                # Get a sample of users from the test data
+                test_users = test_data['user_id'].unique()
+                sample_size = min(100, len(test_users))  # Limit to 100 users for efficiency
+                sampled_users = list(np.random.choice(test_users, size=sample_size, replace=False))
+                
+                # Generate recommendations for these users
+                recommendations = self.predict_batch(sampled_users, n=k)
+                
+                # Import beyond-accuracy metrics function
+                from src.utils.evaluation_metrics import calculate_all_beyond_accuracy_metrics
+                
+                # Get item features for diversity calculation if available
+                item_features = None
+                if hasattr(self, 'item_features') and self.item_features is not None:
+                    # Convert from matrix to dictionary for diversity calculation
+                    # ... model-specific code to extract item features ...
+                
+                # Calculate beyond-accuracy metrics
+                    beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
+                        recommendations, self.train_data, item_features
+                    )
+                
+                # Update results with beyond-accuracy metrics
+                results.update(beyond_accuracy_metrics)
+            
+            # Update metadata with performance results
+            self.metadata['performance'] = results
+            
+            return results
     
     def set_hyperparameters(self, **kwargs: Any) -> None:
         """

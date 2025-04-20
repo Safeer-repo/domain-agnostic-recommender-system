@@ -1,0 +1,7 @@
+2025-04-09 15:41:58,568 - root - INFO - Logging initialized: ./logs/recommender_20250409_154158.log
+2025-04-09 15:41:58,568 - root - INFO - Loading preprocessed data for entertainment/movielens
+2025-04-09 15:41:58,568 - src.preprocessing.preprocessing_pipeline - INFO - Using existing processed data from /Users/safeermoosvi/domain-agnostic-recommender-system/data/processed/entertainment/movielens
+2025-04-09 15:41:58,607 - root - INFO - Loaded 78362 training samples and 19591 test samples
+2025-04-09 15:41:58,607 - src.models.model_registry - INFO - Registered model: als
+2025-04-09 15:41:58,607 - root - INFO - Creating SVD model
+2025-04-09 15:41:58,607 - root - ERROR - Error during training: Unknown model: svd. Available models: ['als']
