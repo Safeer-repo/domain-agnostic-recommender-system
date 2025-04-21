@@ -51,3 +51,15 @@ data/features/*
 !data/features/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
+
+# Large installation files
+*.sh
+
+# Data directories
+data/
+models/
+users/
+ab_tests/
+dataset_stats/
+new_ratings/
+staging/
