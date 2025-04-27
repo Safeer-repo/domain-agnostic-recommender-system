@@ -199,6 +199,7 @@ class ALSModel(BaseModel):
                     'coverage', 'novelty', 'diversity', 'rmse', 'mae']
         
         results = {}
+        beyond_accuracy_metrics = {}
         
         # Compute standard accuracy metrics (this code already exists in your models)
         # ...

@@ -1,0 +1,19 @@
+{
+  "algorithm": "ncf",
+  "version": "1745107990",
+  "timestamp": 1745107990,
+  "map_at_k": 0.33,
+  "ndcg": 0.29,
+  "precision": 0.23,
+  "recall": 0.36,
+  "training_time": 180,
+  "hyperparameters": {
+    "layers": [
+      64,
+      32,
+      16
+    ],
+    "learning_rate": 0.001,
+    "epochs": 20
+  }
+}

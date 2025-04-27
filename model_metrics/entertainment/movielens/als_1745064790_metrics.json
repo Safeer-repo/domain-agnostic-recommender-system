@@ -1,0 +1,15 @@
+{
+  "algorithm": "als",
+  "version": "1745064790",
+  "timestamp": 1745064790,
+  "map_at_k": 0.32,
+  "ndcg": 0.28,
+  "precision": 0.22,
+  "recall": 0.35,
+  "training_time": 120,
+  "hyperparameters": {
+    "factors": 100,
+    "regularization": 0.1,
+    "iterations": 20
+  }
+}

@@ -730,13 +730,6 @@ class ModelRetrainingManager:
     def _get_latest_available_model(self, domain: str, dataset: str) -> Dict[str, Any]:
         """
         Get the latest available model for a domain/dataset.
-        
-        Args:
-            domain: Domain name
-            dataset: Dataset name
-            
-        Returns:
-            Dictionary with model information
         """
         # Look in the models directory for the domain/dataset
         models_path = os.path.join(self.models_dir, domain, dataset)
@@ -752,64 +745,65 @@ class ModelRetrainingManager:
                 "error": f"No models found for {domain}/{dataset}"
             }
         
-        # Find all algorithm directories
-        algorithms = [d for d in os.listdir(models_path) 
-                     if os.path.isdir(os.path.join(models_path, d))]
+        # Check for model files directly in the directory
+        model_files = [f for f in os.listdir(models_path) 
+                    if f.endswith('.pkl') and not f.endswith('_metadata.json')]
         
-        if not algorithms:
-            return {
-                "domain": domain,
-                "dataset": dataset,
-                "algorithm": None,
-                "version": None,
-                "path": None,
-                "source": "none_available",
-                "error": f"No algorithms found for {domain}/{dataset}"
-            }
-        
-        # Get the latest model for each algorithm
-        latest_models = []
-        for algorithm in algorithms:
-            version = self.get_latest_model_version(domain, dataset, algorithm)
-            if version:
-                path = self.get_model_file_path(domain, dataset, algorithm, version)
-                metrics = self.get_model_metrics(domain, dataset, algorithm, version)
+        if model_files:
+            # Extract algorithm names from filenames
+            algorithms = [os.path.splitext(f)[0] for f in model_files]
+            logger.info(f"Found algorithms: {algorithms}")
+            
+            # Get timestamps from metadata files
+            latest_models = []
+            for algorithm in algorithms:
+                metadata_file = os.path.join(models_path, f"{algorithm}_metadata.json")
+                timestamp = int(time.time())  # Default timestamp
                 
+                if os.path.exists(metadata_file):
+                    try:
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+                            timestamp = metadata.get("timestamp", timestamp)
+                    except Exception as e:
+                        logger.error(f"Error reading metadata for {algorithm}: {str(e)}")
+                
+                path = os.path.join(models_path, f"{algorithm}.pkl")
                 latest_models.append({
                     "algorithm": algorithm,
-                    "version": version,
+                    "version": "latest",
                     "path": path,
-                    "metrics": metrics,
-                    "timestamp": metrics.get("timestamp", 0) if metrics else 0
+                    "metrics": {},
+                    "timestamp": timestamp
                 })
+            
+            # Find the most recent model
+            if latest_models:
+                latest_models.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+                latest_model = latest_models[0]
+                
+                recommendation = {
+                    "domain": domain,
+                    "dataset": dataset,
+                    "algorithm": latest_model["algorithm"],
+                    "version": latest_model["version"],
+                    "path": latest_model["path"],
+                    "source": "latest_available",
+                    "timestamp": latest_model.get("timestamp", 0)
+                }
+                
+                return recommendation
         
-        if not latest_models:
-            return {
-                "domain": domain,
-                "dataset": dataset,
-                "algorithm": None,
-                "version": None,
-                "path": None,
-                "source": "none_available",
-                "error": f"No valid models found for {domain}/{dataset}"
-            }
-        
-        # Find the most recent model based on timestamp
-        latest_models.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-        
-        # Return the most recent model
-        latest_model = latest_models[0]
-        recommendation = {
+        # No valid models found
+        return {
             "domain": domain,
             "dataset": dataset,
-            "algorithm": latest_model["algorithm"],
-            "version": latest_model["version"],
-            "path": latest_model["path"],
-            "source": "latest_available",
-            "timestamp": latest_model.get("timestamp", 0)
+            "algorithm": None,
+            "version": None,
+            "path": None,
+            "source": "none_available",
+            "error": f"No valid models found for {domain}/{dataset}"
         }
-        
-        return recommendation
     
     def update_training_stats(self, domain: str, dataset: str) -> bool:
         """

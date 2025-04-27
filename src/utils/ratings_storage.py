@@ -364,3 +364,31 @@ class RatingsStorage:
         
         logger.info(f"Removed {total_removed} processed ratings for {domain}/{dataset}")
         return total_removed
+    
+    def has_user_ratings(self, domain: str, dataset: str, user_id: str) -> bool:
+        """Check if a user has any ratings"""
+        # First check in the main dataset
+        dataset_path = os.path.join(self.data_dir, "datasets", domain, dataset, "ratings.csv")
+        if os.path.exists(dataset_path):
+            try:
+                import pandas as pd
+                ratings_df = pd.read_csv(dataset_path)
+                if 'user_id' in ratings_df.columns and str(user_id) in ratings_df['user_id'].astype(str).values:
+                    return True
+            except Exception as e:
+                logger.error(f"Error checking user ratings in dataset: {str(e)}")
+        
+        # Then check in new ratings
+        new_ratings_path = os.path.join(self.data_dir, "new_ratings", domain, dataset)
+        if os.path.exists(new_ratings_path):
+            rating_files = [f for f in os.listdir(new_ratings_path) if f.endswith('.csv')]
+            for file in rating_files:
+                try:
+                    import pandas as pd
+                    ratings_df = pd.read_csv(os.path.join(new_ratings_path, file))
+                    if 'user_id' in ratings_df.columns and str(user_id) in ratings_df['user_id'].astype(str).values:
+                        return True
+                except Exception as e:
+                    logger.error(f"Error checking user ratings in {file}: {str(e)}")
+        
+        return False
