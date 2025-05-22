@@ -3,6 +3,181 @@ import pandas as pd
 from typing import List, Tuple, Dict, Set
 import scipy.spatial.distance as distance
 
+def calculate_precision_at_k(recommendations, actual_items, k):
+    """
+    Calculate Precision at K.
+    
+    Args:
+        recommendations: Dictionary of user_id -> list of (item_id, score) tuples
+        actual_items: Dictionary of user_id -> list of item_ids that the user actually interacted with
+        k: Number of recommendations to consider
+    
+    Returns:
+        Precision@K score
+    """
+    if not recommendations:
+        return 0.0
+    
+    precisions = []
+    
+    for user_id, recs in recommendations.items():
+        if user_id not in actual_items or not actual_items[user_id]:
+            continue
+        
+        # Get recommended item IDs (without scores)
+        rec_items = [item_id for item_id, _ in recs[:k]]
+        
+        # Get relevant items
+        relevant_items = set(actual_items[user_id])
+        
+        # Count number of relevant items in the recommendations
+        relevant_count = sum(1 for item_id in rec_items if item_id in relevant_items)
+        
+        # Calculate precision
+        precision = relevant_count / min(len(rec_items), k) if min(len(rec_items), k) > 0 else 0
+        precisions.append(precision)
+    
+    # Calculate mean precision
+    if precisions:
+        return sum(precisions) / len(precisions)
+    else:
+        return 0.0
+
+def calculate_recall_at_k(recommendations, actual_items, k):
+    """
+    Calculate Recall at K.
+    
+    Args:
+        recommendations: Dictionary of user_id -> list of (item_id, score) tuples
+        actual_items: Dictionary of user_id -> list of item_ids that the user actually interacted with
+        k: Number of recommendations to consider
+    
+    Returns:
+        Recall@K score
+    """
+    if not recommendations:
+        return 0.0
+    
+    recalls = []
+    
+    for user_id, recs in recommendations.items():
+        if user_id not in actual_items or not actual_items[user_id]:
+            continue
+        
+        # Get recommended item IDs (without scores)
+        rec_items = [item_id for item_id, _ in recs[:k]]
+        
+        # Get relevant items
+        relevant_items = set(actual_items[user_id])
+        
+        # Count number of relevant items in the recommendations
+        relevant_count = sum(1 for item_id in rec_items if item_id in relevant_items)
+        
+        # Calculate recall
+        recall = relevant_count / len(relevant_items) if len(relevant_items) > 0 else 0
+        recalls.append(recall)
+    
+    # Calculate mean recall
+    if recalls:
+        return sum(recalls) / len(recalls)
+    else:
+        return 0.0
+
+def calculate_ndcg_at_k(recommendations, actual_items, k):
+    """
+    Calculate Normalized Discounted Cumulative Gain at K.
+    
+    Args:
+        recommendations: Dictionary of user_id -> list of (item_id, score) tuples
+        actual_items: Dictionary of user_id -> list of item_ids that the user actually interacted with
+        k: Number of recommendations to consider
+    
+    Returns:
+        NDCG@K score
+    """
+    if not recommendations:
+        return 0.0
+    
+    ndcgs = []
+    
+    for user_id, recs in recommendations.items():
+        if user_id not in actual_items or not actual_items[user_id]:
+            continue
+        
+        # Get recommended item IDs (without scores)
+        rec_items = [item_id for item_id, _ in recs[:k]]
+        
+        # Get relevant items
+        relevant_items = set(actual_items[user_id])
+        
+        # Calculate DCG
+        dcg = 0.0
+        for i, item_id in enumerate(rec_items):
+            if item_id in relevant_items:
+                # Use log base 2 for the position discount
+                dcg += 1.0 / np.log2(i + 2)  # +2 because i is 0-indexed and log(1) = 0
+        
+        # Calculate ideal DCG (IDCG)
+        ideal_ranking = [1] * min(len(relevant_items), k)
+        idcg = sum(1.0 / np.log2(i + 2) for i in range(len(ideal_ranking)))
+        
+        # Calculate NDCG
+        ndcg = dcg / idcg if idcg > 0 else 0
+        ndcgs.append(ndcg)
+    
+    # Calculate mean NDCG
+    if ndcgs:
+        return sum(ndcgs) / len(ndcgs)
+    else:
+        return 0.0
+
+def calculate_map_at_k(recommendations, actual_items, k):
+    """
+    Calculate Mean Average Precision at K.
+    
+    Args:
+        recommendations: Dictionary of user_id -> list of (item_id, score) tuples
+        actual_items: Dictionary of user_id -> list of item_ids that the user actually interacted with
+        k: Number of recommendations to consider
+    
+    Returns:
+        MAP@K score
+    """
+    if not recommendations:
+        return 0.0
+    
+    ap_scores = []
+    
+    for user_id, recs in recommendations.items():
+        if user_id not in actual_items or not actual_items[user_id]:
+            continue
+        
+        # Get recommended item IDs (without scores)
+        rec_items = [item_id for item_id, _ in recs[:k]]
+        
+        # Get relevant items
+        relevant_items = set(actual_items[user_id])
+        
+        # Calculate precision at each position
+        precisions = []
+        relevant_count = 0
+        
+        for i, item_id in enumerate(rec_items):
+            if item_id in relevant_items:
+                relevant_count += 1
+                precisions.append(relevant_count / (i + 1))
+        
+        # Calculate average precision
+        if precisions:
+            ap = sum(precisions) / min(len(relevant_items), k)
+            ap_scores.append(ap)
+    
+    # Calculate mean average precision
+    if ap_scores:
+        return sum(ap_scores) / len(ap_scores)
+    else:
+        return 0.0
+
 def calculate_coverage(recommended_items: List[Set[int]], catalog_size: int) -> float:
     """
     Calculate the coverage metric - percentage of items that the system recommends.
@@ -149,3 +324,15 @@ def calculate_all_beyond_accuracy_metrics(
     results['diversity'] = calculate_diversity(recommended_items_list, item_features)
     
     return results
+
+# Ensure all functions are properly exported
+__all__ = [
+    'calculate_precision_at_k',
+    'calculate_recall_at_k',
+    'calculate_ndcg_at_k',
+    'calculate_map_at_k',
+    'calculate_coverage',
+    'calculate_novelty',
+    'calculate_diversity',
+    'calculate_all_beyond_accuracy_metrics'
+]

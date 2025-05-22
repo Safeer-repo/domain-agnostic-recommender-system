@@ -30,8 +30,6 @@ def main():
     parser.add_argument("--lr", type=float, default=0.005, help="Learning rate")
     parser.add_argument("--reg", type=float, default=0.02, help="Regularization parameter")
     parser.add_argument("--k", type=int, default=10, help="K value for evaluation metrics")
-    parser.add_argument("--metrics", nargs="+", default=["rmse", "mae", "precision", "recall"],
-                      help="Metrics to evaluate (rmse, mae, precision, recall)")
     parser.add_argument("--use-features", action="store_true", help="Use user and item features")
     parser.add_argument("--output-recommendations", action="store_true", 
                       help="Output sample recommendations to a file")
@@ -98,9 +96,10 @@ def main():
         train_time = time.time() - start_time
         logging.info(f"Training completed in {train_time:.2f} seconds")
         
-        # Evaluate the model
-        logging.info(f"Evaluating model with k={args.k} and metrics {args.metrics}")
-        metrics = model.evaluate(test_data, k=args.k, metrics=args.metrics)
+        # Evaluate the model with all metrics
+        logging.info(f"Evaluating model with k={args.k}")
+        # IMPORTANT: Don't specify metrics to get all default metrics, including beyond-accuracy metrics
+        metrics = model.evaluate(test_data, k=args.k, train_data=train_data)
         
         # Print evaluation results
         logging.info("Evaluation results:")

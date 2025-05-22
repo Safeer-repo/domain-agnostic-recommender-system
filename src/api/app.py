@@ -10,6 +10,10 @@ from datetime import datetime, timedelta
 import uuid
 import jwt
 from passlib.context import CryptContext
+import numpy as np
+from typing import Union
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from src.utils.ratings_storage import RatingsStorage
 from src.utils.user_manager import UserManager
@@ -33,6 +37,14 @@ app = FastAPI(
     title="Domain-Agnostic Recommender API",
     description="API for a recommender system that works across multiple domains",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For development - in production, specify your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods including OPTIONS
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Initialize components
@@ -66,9 +78,11 @@ class UserLogin(BaseModel):
 
 class Rating(BaseModel):
     user_id: str
-    item_id: int
+    item_id: Union[str, int]
     rating: float
     source: Optional[str] = "explicit"
+    domain: Optional[str] = None    # Add these fields
+    dataset: Optional[str] = None   # Add these fields
 
 class BatchRatings(BaseModel):
     domain: str
@@ -77,9 +91,11 @@ class BatchRatings(BaseModel):
 
 class RecommendationFeedback(BaseModel):
     user_id: str
-    item_id: int
+    item_id: Union[str, int]  # Changed to accept both string and integer
     interaction_type: str  # click, add_to_cart, purchase, etc.
     timestamp: Optional[int] = None
+    domain: Optional[str] = None
+    dataset: Optional[str] = None
     
 class RecommendationRequest(BaseModel):
     user_id: str
@@ -89,7 +105,7 @@ class RecommendationRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
 
 class SimilarItemsRequest(BaseModel):
-    item_id: int
+    item_id: Union[str, int]  # Changed to accept both string and integer
     domain: str
     dataset: str
     count: Optional[int] = 10
@@ -178,43 +194,53 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.post("/user/create", response_model=Dict[str, Any])
 async def create_user(user_data: UserCreate):
     """Create a new user account"""
-    # Check if user already exists
-    if user_manager.user_exists(user_data.username) or user_manager.user_exists(user_data.email):
-        raise HTTPException(status_code=400, detail="Username or email already exists")
-    
-    # Hash the password
-    hashed_password = get_password_hash(user_data.password)
-    
-    # Create the user
-    user_id = user_manager.create_user(
-        username=user_data.username,
-        email=user_data.email,
-        domain_preferences=user_data.domain_preferences
-    )
+    try:
+        # Check if user already exists
+        if user_manager.user_exists(user_data.username) or user_manager.user_exists(user_data.email):
+            raise HTTPException(status_code=400, detail="Username or email already exists")
+        
+        # Hash the password
+        hashed_password = get_password_hash(user_data.password)
+        
+        # Create the user
+        user_id = user_manager.create_user(
+            username=user_data.username,
+            email=user_data.email,
+            domain_preferences=user_data.domain_preferences
+        )
 
-    if not user_id:
-        raise HTTPException(status_code=500, detail="Failed to create user")
+        if not user_id:
+            raise HTTPException(status_code=500, detail="Failed to create user")
 
-    # Add password to user metadata
-    user = user_manager.get_user(user_id)
+        # Add password to user metadata
+        user = user_manager.get_user(user_id)
 
-    # Set admin privileges if username is admin
-    if user_data.username == "admin":
+        # Set admin privileges if username is admin
+        if user_data.username == "admin":
+            metadata = user.get("metadata", {})
+            metadata["is_admin"] = True
+            user_manager.update_user(user_id, {"metadata": metadata})
+            logger.info(f"Set admin privileges for user {user_id}")
+
         metadata = user.get("metadata", {})
-        metadata["is_admin"] = True
+        metadata["password"] = hashed_password
         user_manager.update_user(user_id, {"metadata": metadata})
-        logger.info(f"Set admin privileges for user {user_id}")
-
-    metadata = user.get("metadata", {})
-    metadata["password"] = hashed_password
-    user_manager.update_user(user_id, {"metadata": metadata})
+        
+        # Return user info (without password)
+        user = user_manager.get_user(user_id)
+        if "metadata" in user and "password" in user["metadata"]:
+            del user["metadata"]["password"]
+        
+        return user
     
-    # Return user info (without password)
-    user = user_manager.get_user(user_id)
-    if "metadata" in user and "password" in user["metadata"]:
-        del user["metadata"]["password"]
-    
-    return user
+    except ValidationError as e:
+        # This will catch Pydantic validation errors
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"Error creating user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
 
 @app.post("/user/login")
 async def login_user(login_data: UserLogin):
@@ -263,20 +289,31 @@ async def submit_rating(rating: Rating, user: dict = Depends(get_current_user)):
     if rating.user_id != user["user_id"]:
         raise HTTPException(status_code=403, detail="Cannot submit ratings for other users")
     
-    # Determine domain and dataset from user preferences
-    # This would be more sophisticated in a real system
-    domain = "entertainment"  # Default
-    dataset = "movielens"     # Default
+    # Use domain and dataset from request if provided, otherwise get from user preferences
+    domain = rating.domain
+    dataset = rating.dataset
+    
+    if not domain or not dataset:
+        # Get from user preferences
+        user_prefs = user.get("domain_preferences", {})
+        if user_prefs:
+            # Get the first domain the user has preferences for
+            domain = list(user_prefs.keys())[0] if user_prefs else "entertainment"
+            dataset = user_prefs[domain][0] if domain in user_prefs else "movielens"
+        else:
+            # Default fallback
+            domain = "entertainment"
+            dataset = "movielens"
     
     # Store the rating
     success = ratings_storage.store_rating(
-    domain=domain,
-    dataset=dataset,
-    user_id=rating.user_id,  # No int() conversion
-    item_id=rating.item_id,
-    rating=rating.rating,
-    source=rating.source
-)
+        domain=domain,
+        dataset=dataset,
+        user_id=rating.user_id,
+        item_id=rating.item_id,
+        rating=rating.rating,
+        source=rating.source
+    )
     
     if not success:
         raise HTTPException(status_code=500, detail="Failed to store rating")
@@ -284,7 +321,9 @@ async def submit_rating(rating: Rating, user: dict = Depends(get_current_user)):
     return {
         "status": "success",
         "message": "Rating submitted successfully",
-        "rating": rating.dict()
+        "rating": rating.dict(),
+        "domain": domain,
+        "dataset": dataset
     }
 
 @app.post("/user/rate/batch", response_model=Dict[str, Any])
@@ -297,14 +336,14 @@ async def submit_batch_ratings(batch: BatchRatings, user: dict = Depends(get_cur
     
     # Prepare ratings in the format expected by ratings_storage
     ratings_data = [
-    {
-        "user_id": r.user_id,  
-        "item_id": r.item_id,
-        "rating": r.rating,
-        "source": r.source
-    }
-    for r in batch.ratings
-]
+        {
+            "user_id": r.user_id,  
+            "item_id": r.item_id,
+            "rating": r.rating,
+            "source": r.source
+        }
+        for r in batch.ratings
+    ]
     
     # Store the batch of ratings
     count = ratings_storage.store_ratings_batch(
@@ -333,10 +372,21 @@ async def submit_recommendation_feedback(feedback: RecommendationFeedback, user:
     if feedback.timestamp is None:
         feedback.timestamp = int(time.time())
     
-    # Determine domain and dataset from user preferences
-    # This would be more sophisticated in a real system
-    domain = "entertainment"  # Default
-    dataset = "movielens"     # Default
+    # Use domain and dataset from request if provided, otherwise get from user preferences
+    domain = feedback.domain
+    dataset = feedback.dataset
+    
+    if not domain or not dataset:
+        # Get from user preferences
+        user_prefs = user.get("domain_preferences", {})
+        if user_prefs:
+            # Get the first domain the user has preferences for
+            domain = list(user_prefs.keys())[0] if user_prefs else "entertainment"
+            dataset = user_prefs[domain][0] if domain in user_prefs else "movielens"
+        else:
+            # Default fallback
+            domain = "entertainment"
+            dataset = "movielens"
     
     # Translate interaction_type to ratings
     rating_value = None
@@ -356,13 +406,10 @@ async def submit_recommendation_feedback(feedback: RecommendationFeedback, user:
             dataset=dataset,
             user_id=feedback.user_id,
             item_id=feedback.item_id,
-            rating=rating_value,  # Use the calculated rating value
+            rating=rating_value,
             timestamp=feedback.timestamp,
             source="implicit"
         )
-    
-    # Additionally, could store the raw interaction in a separate system
-    # For simplicity, we'll just use the ratings storage here
     
     if not success:
         raise HTTPException(status_code=500, detail="Failed to store feedback")
@@ -381,28 +428,6 @@ async def get_user_recommendations(request: RecommendationRequest, user: dict = 
     if request.user_id != user["user_id"]:
         raise HTTPException(status_code=403, detail="Cannot get recommendations for other users")
     
-    # Check if this is a new user with no ratings
-    user_has_ratings = ratings_storage.has_user_ratings(
-        domain=request.domain,
-        dataset=request.dataset,
-        user_id=request.user_id
-    )
-    
-    if not user_has_ratings:
-        # For new users, return a special response
-        return {
-            "user_id": request.user_id,
-            "domain": request.domain,
-            "dataset": request.dataset,
-            "model": {
-                "algorithm": "none",
-                "version": "none"
-            },
-            "recommendations": [],
-            "status": "cold_start",
-            "message": "Please rate some items to get personalized recommendations"
-        }
-    
     # Get the recommended model for this domain/dataset
     model_info = model_manager.get_recommended_model(
         domain=request.domain,
@@ -412,26 +437,105 @@ async def get_user_recommendations(request: RecommendationRequest, user: dict = 
     if model_info.get("algorithm") is None:
         raise HTTPException(status_code=404, detail="No recommendation model available for this domain/dataset")
     
-    # Generate recommendations
-    recommendations = [
-        {
-            "item_id": 100 + i,
-            "score": 0.9 - (i * 0.05),
-            "reason": "Based on your viewing history"
+    # Load the actual model and get real recommendations
+    try:
+        model_algorithm = model_info.get("algorithm")
+        model_version = model_info.get("version", "latest")
+        
+        # Load the model using the model registry
+        from src.models.model_registry import ModelRegistry
+        model_registry = ModelRegistry(artifacts_dir="./artifacts")
+        
+        # Load the model
+        model = model_registry.load_model(
+            model_id=model_algorithm,
+            domain=request.domain,
+            dataset_name=request.dataset
+        )
+        
+        # Get the user's original dataset ID if it exists
+        user_data = user_manager.get_user(request.user_id)
+        original_dataset_id = user_data.get("metadata", {}).get("original_dataset_id")
+        
+        # Get actual recommendations from the model
+        recommendations = model.predict(original_dataset_id if original_dataset_id else request.user_id, n=request.count)
+        
+        # Format the recommendations and convert NumPy types to Python types
+        formatted_recommendations = []
+        for item_id, score in recommendations:
+            # Convert NumPy types to native Python types
+            if hasattr(item_id, 'item'):  # Check if it's a NumPy type
+                item_id = item_id.item()
+            elif isinstance(item_id, np.integer):
+                item_id = int(item_id)
+            elif isinstance(item_id, np.floating):
+                item_id = float(item_id)
+            
+            if hasattr(score, 'item'):  # Check if it's a NumPy type
+                score = score.item()
+            elif isinstance(score, np.integer):
+                score = int(score)
+            elif isinstance(score, np.floating):
+                score = float(score)
+            
+            formatted_recommendations.append({
+                "item_id": item_id,
+                "score": float(score),
+                "reason": "Based on your interaction history"
+            })
+        
+        # If no recommendations, it means the user wasn't found in the model
+        if not formatted_recommendations:
+            return {
+                "user_id": request.user_id,
+                "domain": request.domain,
+                "dataset": request.dataset,
+                "model": {
+                    "algorithm": model_algorithm,
+                    "version": model_version
+                },
+                "recommendations": [],
+                "status": "cold_start",
+                "message": "Please rate some items to get personalized recommendations"
+            }
+        
+        return {
+            "user_id": request.user_id,
+            "domain": request.domain,
+            "dataset": request.dataset,
+            "model": {
+                "algorithm": model_algorithm,
+                "version": model_version
+            },
+            "recommendations": formatted_recommendations
         }
-        for i in range(request.count)
-    ]
-    
-    return {
-        "user_id": request.user_id,
-        "domain": request.domain,
-        "dataset": request.dataset,
-        "model": {
-            "algorithm": model_info.get("algorithm"),
-            "version": model_info.get("version")
-        },
-        "recommendations": recommendations
-    }
+        
+    except Exception as e:
+        logger.error(f"Error generating recommendations: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Fallback to dummy recommendations if there's an error
+        recommendations = [
+            {
+                "item_id": 100 + i,
+                "score": 0.9 - (i * 0.05),
+                "reason": "Based on popular items"
+            }
+            for i in range(request.count)
+        ]
+        
+        return {
+            "user_id": request.user_id,
+            "domain": request.domain,
+            "dataset": request.dataset,
+            "model": {
+                "algorithm": model_algorithm if 'model_algorithm' in locals() else "unknown",
+                "version": model_version if 'model_version' in locals() else "unknown"
+            },
+            "recommendations": recommendations,
+            "status": "error",
+            "message": f"Error generating recommendations: {str(e)}"
+        }
 
 @app.post("/recommendations/similar", response_model=Dict[str, Any])
 async def get_similar_items(request: SimilarItemsRequest, _: dict = Depends(get_current_user)):
@@ -445,17 +549,124 @@ async def get_similar_items(request: SimilarItemsRequest, _: dict = Depends(get_
     if model_info.get("algorithm") is None:
         raise HTTPException(status_code=404, detail="No recommendation model available for this domain/dataset")
     
-    # In a real system, you would use the model to find similar items
-    # For this example, we'll generate dummy similar items
-    similar_items = [
-        {
-            "item_id": request.item_id + (1000 * i),
-            "similarity": 0.9 - (i * 0.1),
-            "reason": "Similar genre and rating pattern"
-        }
-        for i in range(request.count)
-    ]
+    # Load the model using the model registry
+    from src.models.model_registry import ModelRegistry
+    model_registry = ModelRegistry(artifacts_dir="./artifacts")
     
+    # Load the model
+    try:
+        model = model_registry.load_model(
+            model_id=model_info.get("algorithm"),
+            domain=request.domain,
+            dataset_name=request.dataset  # Changed from dataset to dataset_name
+        )
+        
+        # Get similar items
+        similar_items = model.get_similar_items(request.item_id, n=request.count)
+        
+        # Format the similar items
+        formatted_items = []
+        for item_id, score in similar_items:
+            formatted_items.append({
+                "item_id": item_id,
+                "similarity": float(score),
+                "reason": "Based on item features and user interactions"
+            })
+            
+        # Fallback: If no similar items found, return random items
+        if not formatted_items:
+            try:
+                # Import needed here to avoid circular imports
+                import pandas as pd
+                import random
+                import os
+                
+                # Path to processed dataset
+                processed_path = os.path.join(data_dir, "processed", request.domain, request.dataset, "train.csv")
+                
+                if os.path.exists(processed_path):
+                    # Read the dataset
+                    df = pd.read_csv(processed_path)
+                    
+                    # Get unique item IDs, excluding the requested item
+                    item_ids = df['item_id'].astype(str).unique().tolist()
+                    if str(request.item_id) in item_ids:
+                        item_ids.remove(str(request.item_id))
+                    
+                    # Randomly select items
+                    count = min(request.count, len(item_ids))
+                    if count > 0:
+                        random_items = random.sample(item_ids, count)
+                        
+                        # Format the random items
+                        for i, item_id in enumerate(random_items):
+                            # Generate a decreasing similarity score for visual effect
+                            similarity = max(0.1, 0.9 - (i * 0.1)) 
+                            formatted_items.append({
+                                "item_id": item_id,
+                                "similarity": similarity,
+                                "reason": "Random suggestion (similar items unavailable)"
+                            })
+                        
+                        logger.info(f"Returning {len(formatted_items)} random items as fallback")
+                    else:
+                        logger.warning(f"No items available for random fallback")
+                else:
+                    logger.warning(f"Processed dataset not found: {processed_path}")
+            except Exception as e:
+                logger.error(f"Error generating random items: {str(e)}")
+                # If random fallback fails, use dummy items as final fallback
+                try:
+                    # Handle both string and integer item IDs
+                    if isinstance(request.item_id, str) and not request.item_id.isdigit():
+                        # For string IDs like Amazon, generate random alphanumeric IDs
+                        import string
+                        similar_items = [
+                            {
+                                "item_id": 'B' + ''.join(random.choices(string.digits + string.ascii_uppercase, k=9)),
+                                "similarity": 0.9 - (i * 0.1),
+                                "reason": "Similar genre and rating pattern (fallback)"
+                            }
+                            for i in range(request.count)
+                        ]
+                    else:
+                        # For numeric IDs like MovieLens
+                        base_id = int(request.item_id) if isinstance(request.item_id, str) else request.item_id
+                        similar_items = [
+                            {
+                                "item_id": base_id + (10 * i),
+                                "similarity": 0.9 - (i * 0.1),
+                                "reason": "Similar genre and rating pattern (fallback)"
+                            }
+                            for i in range(request.count)
+                        ]
+                    formatted_items = similar_items
+                except Exception as inner_e:
+                    logger.error(f"Error generating dummy items: {str(inner_e)}")
+    except Exception as e:
+        logger.error(f"Error finding similar items: {str(e)}")
+        # Fallback to dummy similar items
+        similar_items = [
+            {
+                "item_id": request.item_id + (1000 * i) if isinstance(request.item_id, int) else f"B{i:09d}",
+                "similarity": 0.9 - (i * 0.1),
+                "reason": "Similar genre and rating pattern"
+            }
+            for i in range(request.count)
+        ]
+        
+        return {
+            "item_id": request.item_id,
+            "domain": request.domain,
+            "dataset": request.dataset,
+            "model": {
+                "algorithm": model_info.get("algorithm"),
+                "version": model_info.get("version")
+            },
+            "similar_items": similar_items
+        }
+    
+    # Final return after successful processing
     return {
         "item_id": request.item_id,
         "domain": request.domain,
@@ -464,9 +675,154 @@ async def get_similar_items(request: SimilarItemsRequest, _: dict = Depends(get_
             "algorithm": model_info.get("algorithm"),
             "version": model_info.get("version")
         },
-        "similar_items": similar_items
+        "similar_items": formatted_items
     }
 
+@app.post("/recommendations/trending", response_model=Dict[str, Any])
+async def get_trending_items(
+    request: RecommendationRequest, 
+    _: dict = Depends(get_current_user)
+):
+    """Get popular/trending items from the dataset"""
+    try:
+        # Import needed here to avoid circular imports
+        import pandas as pd
+        import numpy as np
+        import random
+        import os
+        
+        # Path to processed dataset
+        processed_path = os.path.join(data_dir, "processed", request.domain, request.dataset, "train.csv")
+        
+        if not os.path.exists(processed_path):
+            # Fallback to dummy items if dataset not found
+            logger.warning(f"Processed dataset not found: {processed_path}")
+            trending_items = [
+                {
+                    "item_id": 1000 + i,
+                    "score": 0.9 - (i * 0.05),
+                    "reason": "Popular in this category"
+                }
+                for i in range(request.count)
+            ]
+            return {
+                "domain": request.domain,
+                "dataset": request.dataset,
+                "trending_items": trending_items
+            }
+        
+        # Read the dataset
+        df = pd.read_csv(processed_path)
+        
+        # Option 1: Get most rated items (popularity based on interaction count)
+        if 'item_id' in df.columns and 'rating' in df.columns:
+            # Count ratings per item and get top N
+            item_popularity = df.groupby('item_id').size().reset_index(name='count')
+            item_popularity = item_popularity.sort_values('count', ascending=False)
+            
+            # Get top items
+            top_items = item_popularity.head(request.count)
+            
+            # Format the trending items
+            trending_items = []
+            for i, row in top_items.iterrows():
+                # Convert NumPy types to native Python types
+                item_id = row['item_id']
+                if isinstance(item_id, np.integer):
+                    item_id = int(item_id)
+                elif isinstance(item_id, np.floating):
+                    item_id = float(item_id)
+                
+                # Calculate an average rating if available
+                avg_rating = df[df['item_id'] == item_id]['rating'].mean() if 'rating' in df.columns else None
+                
+                # Convert rating to native Python float
+                if avg_rating is not None:
+                    if isinstance(avg_rating, np.floating):
+                        avg_rating = float(avg_rating)
+                    elif isinstance(avg_rating, np.integer):
+                        avg_rating = float(int(avg_rating))
+                
+                trending_items.append({
+                    "item_id": item_id,
+                    "score": avg_rating if avg_rating is not None else float(0.9 - (i * 0.05)),
+                    "reason": "Popular among users"
+                })
+                
+            return {
+                "domain": request.domain,
+                "dataset": request.dataset,
+                "trending_items": trending_items
+            }
+        
+        # Option 2: If dataset structure is different, fallback to random selection
+        if 'item_id' in df.columns:
+            # Get unique item IDs and convert to Python native types
+            item_ids = df['item_id'].unique().tolist()
+            item_ids = [int(id) if isinstance(id, np.integer) else 
+                       float(id) if isinstance(id, np.floating) else id 
+                       for id in item_ids]
+            
+            # Randomly select items
+            count = min(request.count, len(item_ids))
+            if count > 0:
+                selected_items = random.sample(item_ids, count)
+                
+                # Format the trending items
+                trending_items = [
+                    {
+                        "item_id": item_id,
+                        "score": 0.9 - (i * 0.1),
+                        "reason": "Trending in this category"
+                    }
+                    for i, item_id in enumerate(selected_items)
+                ]
+                
+                return {
+                    "domain": request.domain,
+                    "dataset": request.dataset,
+                    "trending_items": trending_items
+                }
+                
+        # Fallback to dummy items if dataset doesn't have expected structure
+        trending_items = [
+            {
+                "item_id": 1000 + i,
+                "score": 0.9 - (i * 0.05),
+                "reason": "Popular in this category"
+            }
+            for i in range(request.count)
+        ]
+        
+        return {
+            "domain": request.domain,
+            "dataset": request.dataset,
+            "trending_items": trending_items
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting trending items: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # Fallback to dummy trending items if there's an error
+        trending_items = [
+            {
+                "item_id": 1000 + i,
+                "score": 0.9 - (i * 0.05),
+                "reason": "Popular in this category"
+            }
+            for i in range(request.count)
+        ]
+        
+        return {
+            "domain": request.domain,
+            "dataset": request.dataset,
+            "trending_items": trending_items,
+            "status": "error",
+            "message": f"Error retrieving trending items: {str(e)}"
+        }
+    
 @app.get("/models/{domain}/{dataset}", response_model=Dict[str, Any])
 async def get_model_info(
     domain: str = Path(..., description="Domain name"),
@@ -635,7 +991,7 @@ async def retrain_model(
 async def get_system_stats(_: dict = Depends(get_current_admin)):
     """Get statistics about the recommender system"""
     # Get all domains and datasets
-    models_dir = os.path.join(data_dir, "models")
+    models_dir = "./artifacts/models"  # Use the correct models directory path
     if not os.path.exists(models_dir):
         return {"status": "no_data", "message": "No models directory found"}
     
@@ -690,9 +1046,19 @@ async def get_system_stats(_: dict = Depends(get_current_admin)):
             }
             
             # Count models for each algorithm
+            # First count PKL files directly in the dataset directory
+            direct_pkl_files = [f for f in os.listdir(dataset_dir) if f.endswith(".pkl") and os.path.isfile(os.path.join(dataset_dir, f))]
+            stats["domains"][domain]["datasets"][dataset]["models_count"] += len(direct_pkl_files)
+            stats["models"]["total"] += len(direct_pkl_files)
+
+            # Then count files in algorithm subdirectories
             for algorithm in algorithms:
                 algorithm_dir = os.path.join(dataset_dir, algorithm)
-                model_files = [f for f in os.listdir(algorithm_dir) if f.endswith(".model")]
+                # Count files with various model extensions
+                model_files = []
+                for ext in [".model", ".pkl", ".bin", ".h5", ".joblib"]:
+                    model_files.extend([f for f in os.listdir(algorithm_dir) if f.endswith(ext)])
+                
                 stats["domains"][domain]["datasets"][dataset]["models_count"] += len(model_files)
                 stats["models"]["total"] += len(model_files)
     

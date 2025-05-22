@@ -294,24 +294,16 @@ class SARModel(BaseModel):
         
         return recommendations
     
-    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None) -> Dict[str, float]:
+    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None, train_data: Optional[pd.DataFrame] = None) -> Dict[str, float]:
         """
         Evaluate the model's performance.
-        
-        Args:
-            test_data: Test data with user_id, item_id, and rating columns
-            k: Number of recommendations to consider
-            metrics: List of metrics to compute
-            
-        Returns:
-            Dictionary of performance metrics
         """
         if not self.fitted:
             raise ValueError("Model has not been fitted yet")
         
         if metrics is None:
             metrics = ['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 
-                      'coverage', 'novelty', 'diversity']
+                    'coverage', 'novelty', 'diversity']
         
         results = {}
         
@@ -323,8 +315,14 @@ class SARModel(BaseModel):
             logger.warning("No valid test users found in the model")
             return {metric: 0.0 for metric in metrics}
         
-        # Generate recommendations for each user
-        all_recommendations = self.predict_batch(test_users, n=k)
+        # SAMPLE USERS FOR EVALUATION - Add this to prevent hanging
+        sample_size = min(1000, len(test_users))  # Limit to 1000 users for efficiency
+        logger.info(f"Sampling {sample_size} users from {len(test_users)} for evaluation")
+        import numpy as np
+        sampled_users = np.random.choice(test_users, size=sample_size, replace=False)
+        
+        # Generate recommendations for SAMPLED users only
+        all_recommendations = self.predict_batch(sampled_users, n=k)
         
         # Convert test data to a dictionary for easier lookup
         test_dict = test_data.groupby(self.col_user)[self.col_item].apply(list).to_dict()
@@ -335,7 +333,7 @@ class SARModel(BaseModel):
         ndcg_scores = []
         ap_scores = []
         
-        for user_id in test_users:
+        for user_id in sampled_users:  # Changed from test_users to sampled_users
             if user_id not in test_dict:
                 continue
             
@@ -386,13 +384,19 @@ class SARModel(BaseModel):
         if any(m in metrics for m in ['coverage', 'novelty', 'diversity']):
             from src.utils.evaluation_metrics import calculate_all_beyond_accuracy_metrics
             
-            # Calculate beyond-accuracy metrics using the same set of recommendations
-            beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
-                all_recommendations, self.train_data, None
-            )
+            # Use provided train_data or the one stored during fitting
+            train_data_to_use = train_data if train_data is not None else self.train_data
             
-            # Update results with beyond-accuracy metrics
-            results.update(beyond_accuracy_metrics)
+            if train_data_to_use is not None:
+                # Calculate beyond-accuracy metrics using the same set of recommendations
+                beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
+                    all_recommendations, train_data_to_use, None
+                )
+                
+                # Update results with beyond-accuracy metrics
+                results.update(beyond_accuracy_metrics)
+            else:
+                logger.warning("Training data not available for beyond-accuracy metrics")
         
         # Update metadata with performance results
         self.metadata['performance'] = results

@@ -95,7 +95,7 @@ def main():
         
         # Evaluate the model
         logging.info(f"Evaluating model with k={args.k}")
-        metrics = model.evaluate(test_data, k=args.k)
+        metrics = model.evaluate(test_data, k=args.k, train_data=train_data)
         
         # Print evaluation results
         logging.info("Evaluation results:")

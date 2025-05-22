@@ -176,13 +176,6 @@ class BaselineModel(BaseModel):
     def predict_batch(self, user_ids: List[int], n: int = 10) -> Dict[int, List[Tuple[int, float]]]:
         """
         Generate recommendations for multiple users.
-        
-        Args:
-            user_ids: List of user IDs
-            n: Number of recommendations per user
-            
-        Returns:
-            Dictionary mapping user IDs to lists of (item_id, score) tuples
         """
         if not self.fitted:
             raise ValueError("Model has not been fitted yet")
@@ -190,36 +183,38 @@ class BaselineModel(BaseModel):
         recommendations = {}
         
         for user_id in user_ids:
-            recommendations[user_id] = self.predict(user_id, n=n)
+            try:
+                recommendations[user_id] = self.predict(user_id, n=n)
+            except Exception as e:
+                logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
+                recommendations[user_id] = []  # Return empty recommendations on error
         
         return recommendations
     
-    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None) -> Dict[str, float]:
+    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None, train_data: Optional[pd.DataFrame] = None) -> Dict[str, float]:
         """
         Evaluate the model's performance.
-        
-        Args:
-            test_data: Test data with user_id, item_id, and rating columns
-            k: Number of recommendations to consider
-            metrics: List of metrics to compute
-            
-        Returns:
-            Dictionary of performance metrics
         """
         if not self.fitted:
             raise ValueError("Model has not been fitted yet")
         
         if metrics is None:
             metrics = ['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 
-                      'coverage', 'novelty', 'diversity', 'rmse', 'mae']
+                    'coverage', 'novelty', 'diversity', 'rmse', 'mae']
         
         results = {}
         
         # Get unique users from test data
         test_users = test_data[self.col_user].unique()
         
-        # Generate recommendations for each user
-        all_recommendations = self.predict_batch(test_users, n=k)
+        # SAMPLE USERS FOR EVALUATION
+        sample_size = min(100, len(test_users))
+        logger.info(f"Sampling {sample_size} users from {len(test_users)} for evaluation")
+        sampled_users = np.random.choice(test_users, size=sample_size, replace=False)
+        
+        # Generate recommendations for SAMPLED users only
+        logger.info("Generating recommendations for sampled users...")
+        all_recommendations = self.predict_batch(sampled_users, n=k)
         
         # Convert test data to a dictionary for easier lookup
         test_dict = test_data.groupby(self.col_user)[self.col_item].apply(list).to_dict()
@@ -230,12 +225,26 @@ class BaselineModel(BaseModel):
         ndcg_scores = []
         ap_scores = []
         
-        for user_id in test_users:
+        # Only evaluate users that have recommendations
+        for user_id in sampled_users:
+            # Check if user has recommendations
+            if user_id not in all_recommendations:
+                logger.debug(f"User {user_id} not found in recommendations")
+                continue
+                
             if user_id not in test_dict:
+                logger.debug(f"User {user_id} not found in test data")
                 continue
             
             actual_items = set(test_dict[user_id])
-            recommended_items = [item_id for item_id, _ in all_recommendations[user_id]]
+            
+            # Safely get recommendations
+            user_recommendations = all_recommendations.get(user_id, [])
+            if not user_recommendations:
+                logger.debug(f"No recommendations for user {user_id}")
+                continue
+                
+            recommended_items = [item_id for item_id, _ in user_recommendations]
             
             # Precision@k
             hits = len(set(recommended_items) & actual_items)

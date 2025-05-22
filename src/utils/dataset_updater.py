@@ -258,8 +258,8 @@ class DatasetUpdater:
         max_expected = dataset_stats.get("avg_ratings_per_user", 10) * 5  # allow 5x average
         
         outlier_users = user_counts[user_counts > max_expected].to_dict()
-        # Convert keys to strings for JSON serialization if needed
-        outlier_users = {int(k): int(v) for k, v in outlier_users.items()}
+        # Convert keys to strings for JSON serialization
+        outlier_users = {str(k): int(v) for k, v in outlier_users.items()}
         
         report["validation_checks"]["user_outliers"] = {
             "count": len(outlier_users),
@@ -272,8 +272,8 @@ class DatasetUpdater:
         max_expected_item = dataset_stats.get("avg_ratings_per_item", 10) * 5  # allow 5x average
         
         outlier_items = item_counts[item_counts > max_expected_item].to_dict()
-        # Convert keys to strings for JSON serialization if needed
-        outlier_items = {int(k): int(v) for k, v in outlier_items.items()}
+        # Convert keys to strings for JSON serialization
+        outlier_items = {str(k): int(v) for k, v in outlier_items.items()}
         
         report["validation_checks"]["item_outliers"] = {
             "count": len(outlier_items),

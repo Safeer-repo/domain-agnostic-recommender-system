@@ -266,15 +266,34 @@ class ModelRetrainingManager:
         Returns:
             Tuple of (should_retrain, report)
         """
+        # In detect_distribution_shift method
         stats_path = os.path.join(self.stats_dir, domain, dataset)
-        
+
         if not os.path.exists(stats_path):
-            return False, {"status": "error", "message": f"Stats directory not found for {domain}/{dataset}"}
-        
-        # Get the current stats file
-        stats_file = os.path.join(stats_path, "dataset_stats.json")
-        if not os.path.exists(stats_file):
-            return False, {"status": "error", "message": f"Stats file not found for {domain}/{dataset}"}
+            os.makedirs(stats_path, exist_ok=True)
+            default_stats = {
+                "timestamp": int(time.time()),
+                "min_rating": 1.0,
+                "max_rating": 5.0,
+                "avg_rating": 3.0,
+                "rating_distribution": [0.2, 0.2, 0.2, 0.2, 0.2],  # default uniform
+                "total_users": 0,
+                "total_items": 0,
+                "total_ratings": 0,
+                "avg_ratings_per_user": 0,
+                "avg_ratings_per_item": 0,
+                "sparsity": 0.0
+            }
+            
+            stats_file = os.path.join(stats_path, "dataset_stats.json")
+            try:
+                with open(stats_file, 'w') as f:
+                    json.dump(default_stats, f, indent=2)
+                logger.info(f"Created default stats file for {domain}/{dataset}")
+            except Exception as e:
+                logger.error(f"Error creating default stats file: {str(e)}")
+                
+            return True, {"status": "no_stats", "message": "Created default stats file. Retraining recommended."}
             
         # Load current stats
         try:
@@ -820,31 +839,42 @@ class ModelRetrainingManager:
         stats_path = os.path.join(self.stats_dir, domain, dataset)
         
         if not os.path.exists(stats_path):
-            logger.error(f"Stats directory not found for {domain}/{dataset}")
-            return False
+            os.makedirs(stats_path, exist_ok=True)
+            logger.info(f"Created stats directory for {domain}/{dataset}")
         
         # Get the current stats file
         stats_file = os.path.join(stats_path, "dataset_stats.json")
         if not os.path.exists(stats_file):
-            logger.error(f"Stats file not found for {domain}/{dataset}")
-            return False
+            # Create a default stats file
+            default_stats = {
+                "timestamp": int(time.time()),
+                "min_rating": 1.0,
+                "max_rating": 5.0,
+                "avg_rating": 3.0,
+                "rating_distribution": [0.2, 0.2, 0.2, 0.2, 0.2],  # default uniform
+                "total_users": 0,
+                "total_items": 0,
+                "total_ratings": 0,
+                "avg_ratings_per_user": 0,
+                "avg_ratings_per_item": 0,
+                "sparsity": 0.0
+            }
             
-        # Load current stats
-        try:
-            with open(stats_file, 'r') as f:
-                current_stats = json.load(f)
+            try:
+                with open(stats_file, 'w') as f:
+                    json.dump(default_stats, f, indent=2)
+                logger.info(f"Created default stats file for {domain}/{dataset}")
                 
-            # Save as training stats
-            training_stats_file = os.path.join(stats_path, "last_training_stats.json")
-            with open(training_stats_file, 'w') as f:
-                json.dump(current_stats, f, indent=2)
-                
-            logger.info(f"Updated training stats for {domain}/{dataset}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error updating training stats: {str(e)}")
-            return False
+                # Save as training stats and return
+                training_stats_file = os.path.join(stats_path, "last_training_stats.json")
+                with open(training_stats_file, 'w') as f:
+                    json.dump(default_stats, f, indent=2)
+                    
+                logger.info(f"Created default training stats for {domain}/{dataset}")
+                return True
+            except Exception as e:
+                logger.error(f"Error creating default stats file: {str(e)}")
+                return False
     
     def should_retrain(self, domain: str, dataset: str) -> Dict[str, Any]:
         """

@@ -83,11 +83,46 @@ def download_movielens(data_dir):
     logger.info("MovieLens dataset download complete")
 
 def download_amazon(data_dir):
-    """Download Amazon Electronics dataset."""
-    # Note: This is a placeholder. The actual Amazon Electronics dataset
-    # may be too large or require different download methods.
-    logger.info("Amazon Electronics dataset download would be implemented here")
-    logger.info("Please manually download from https://jmcauley.ucsd.edu/data/amazon/")
+    """Download Amazon Electronics dataset from Kaggle."""
+    domain_dir = os.path.join(data_dir, "raw", "ecommerce", "amazon")
+    os.makedirs(domain_dir, exist_ok=True)
+    
+    logger.info("Attempting to download Amazon Product Reviews dataset")
+    
+    try:
+        # Check if kaggle is installed and configured
+        import importlib.util
+        kaggle_spec = importlib.util.find_spec('kaggle')
+        
+        if kaggle_spec is not None:
+            logger.info("Using Kaggle API to download dataset")
+            import kaggle
+            # Download the dataset
+            kaggle.api.dataset_download_files(
+                'saurav9786/amazon-product-reviews',
+                path=domain_dir,
+                unzip=True
+            )
+            logger.info(f"Dataset successfully downloaded to {domain_dir}")
+        else:
+            logger.warning("Kaggle API not found. Please follow manual download instructions.")
+            _show_manual_amazon_download_instructions(domain_dir)
+    
+    except Exception as e:
+        logger.error(f"Error downloading dataset: {str(e)}")
+        _show_manual_amazon_download_instructions(domain_dir)
+
+def _show_manual_amazon_download_instructions(domain_dir):
+    """Display instructions for manually downloading the Amazon dataset."""
+    logger.info("\n" + "="*80)
+    logger.info("MANUAL DOWNLOAD INSTRUCTIONS FOR AMAZON PRODUCT REVIEWS DATASET")
+    logger.info("="*80)
+    logger.info("1. Visit: https://www.kaggle.com/datasets/saurav9786/amazon-product-reviews/data")
+    logger.info("2. Click 'Download' (you may need to create a Kaggle account if you don't have one)")
+    logger.info("3. Once downloaded, extract the ZIP file")
+    logger.info(f"4. Place the extracted CSV files in this directory: {domain_dir}")
+    logger.info("5. Ensure the main review file is named 'amazon_product_reviews.csv'")
+    logger.info("="*80 + "\n")
 
 def download_open_university(data_dir):
     """Download Open University Learning Analytics dataset."""

@@ -101,12 +101,12 @@ def main():
         logging.info(f"Training completed in {train_time:.2f} seconds")
         
         # Evaluate the model
-        logging.info(f"Evaluating model with k={args.k} and metrics ['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 'rmse', 'mae']")
-        metrics = model.evaluate(
-            test_data, 
-            k=args.k, 
-            metrics=['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 'rmse', 'mae']
-        )
+        logging.info(f"Evaluating model with k={args.k}")
+        try:
+            metrics = model.evaluate(test_data, k=args.k, train_data=train_data)
+        except TypeError:
+            # Fallback if evaluate doesn't accept train_data
+            metrics = model.evaluate(test_data, k=args.k)
         
         # Print evaluation results
         logging.info("Evaluation results:")

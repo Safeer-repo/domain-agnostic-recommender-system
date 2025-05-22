@@ -82,12 +82,12 @@ def main():
         
         # Define parameter grid
         param_grid = {
-            "no_components": [32, 64, 128],                  # Number of latent factors
-            "loss": ["warp", "bpr", "logistic"],            # Loss function
-            "learning_rate": [0.01, 0.05, 0.1],             # Learning rate
-            "item_alpha": [0.0001, 0.001, 0.01],            # L2 regularization for items
-            "user_alpha": [0.0001, 0.001, 0.01],            # L2 regularization for users
-            "epochs": [20]                                   # Keep epochs fixed for efficiency
+            "no_components": [32, 64],           # Reduced from [32, 64, 128]
+            "loss": ["warp", "bpr"],             # Reduced from ["warp", "bpr", "logistic"]
+            "learning_rate": [0.05, 0.1],        # Reduced from [0.01, 0.05, 0.1]
+            "item_alpha": [0.0001, 0.001],       # Reduced from [0.0001, 0.001, 0.01]
+            "user_alpha": [0.0001, 0.001],       # Reduced from [0.0001, 0.001, 0.01]
+            "epochs": [20]
         }
         
         # Generate all combinations of parameters
@@ -136,7 +136,7 @@ def main():
                 model.fit(train_data, user_features, item_features)
                 
                 # Evaluate the model
-                eval_metrics = model.evaluate(test_data, k=args.k)
+                eval_metrics = model.evaluate(test_data, k=args.k, train_data=train_data)
                 
                 # Record current score
                 current_score = eval_metrics.get(args.metric, 0)

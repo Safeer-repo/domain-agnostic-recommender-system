@@ -305,7 +305,7 @@ class LightFMModel(BaseModel):
         
         return results
 
-    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None) -> Dict[str, float]:
+    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None, train_data: Optional[pd.DataFrame] = None) -> Dict[str, float]:
         """
         Evaluate the model's performance.
         
@@ -313,6 +313,7 @@ class LightFMModel(BaseModel):
             test_data: Test data with user_id, item_id, and rating columns
             k: Number of recommendations to consider
             metrics: List of metrics to compute
+            train_data: Training data (optional, used for beyond-accuracy metrics)
             
         Returns:
             Dictionary of performance metrics
@@ -326,39 +327,69 @@ class LightFMModel(BaseModel):
         
         results = {}
         
-        # Compute standard accuracy metrics (this code already exists in your models)
-        # ...
+        # Sample users for evaluation
+        test_users = test_data['user_id'].unique()
+        sample_size = min(1000, len(test_users))
+        logger.info(f"Sampling {sample_size} users from {len(test_users)} for evaluation")
+        sampled_users = np.random.choice(test_users, size=sample_size, replace=False)
         
-        # Compute beyond-accuracy metrics (coverage, novelty, diversity)
+        # Generate recommendations for these users
+        recommendations = self.predict_batch(sampled_users, n=k)
+        
+        # Get actual items from test data
+        actual_items = {}
+        for user_id in sampled_users:
+            user_test = test_data[test_data['user_id'] == user_id]
+            actual_items[user_id] = user_test['item_id'].tolist()
+        
+        # Calculate standard accuracy metrics
+        from src.utils.evaluation_metrics import (
+            calculate_precision_at_k,
+            calculate_recall_at_k,
+            calculate_ndcg_at_k,
+            calculate_map_at_k,
+            calculate_all_beyond_accuracy_metrics
+        )
+        
+        if 'precision_at_k' in metrics:
+            results['precision_at_k'] = calculate_precision_at_k(recommendations, actual_items, k)
+        
+        if 'recall_at_k' in metrics:
+            results['recall_at_k'] = calculate_recall_at_k(recommendations, actual_items, k)
+        
+        if 'ndcg_at_k' in metrics:
+            results['ndcg_at_k'] = calculate_ndcg_at_k(recommendations, actual_items, k)
+        
+        if 'map_at_k' in metrics:
+            results['map_at_k'] = calculate_map_at_k(recommendations, actual_items, k)
+        
+        # Calculate beyond-accuracy metrics
         if any(m in metrics for m in ['coverage', 'novelty', 'diversity']):
-            # Get a sample of users from the test data
-            test_users = test_data['user_id'].unique()
-            sample_size = min(100, len(test_users))  # Limit to 100 users for efficiency
-            sampled_users = list(np.random.choice(test_users, size=sample_size, replace=False))
+            # Use provided train_data or create a temporary one from interactions matrix
+            if train_data is not None:
+                train_data_to_use = train_data
+            elif self.interactions_matrix is not None:
+                # Convert sparse matrix to temporary DataFrame for beyond-accuracy metrics
+                rows, cols = self.interactions_matrix.nonzero()
+                train_data_to_use = pd.DataFrame({
+                    'user_id': [self.reverse_user_index[r] for r in rows],
+                    'item_id': [self.reverse_item_index[c] for c in cols]
+                })
+            else:
+                logger.warning("No training data available for beyond-accuracy metrics")
+                train_data_to_use = None
             
-            # Generate recommendations for these users
-            recommendations = self.predict_batch(sampled_users, n=k)
-            
-            # Import beyond-accuracy metrics function
-            from src.utils.evaluation_metrics import calculate_all_beyond_accuracy_metrics
-            
-            # Get item features for diversity calculation if available
-            item_features = None
-            if hasattr(self, 'item_features') and self.item_features is not None:
-                # Convert from matrix to dictionary for diversity calculation
-                # ... model-specific code to extract item features ...
-            
-            # Calculate beyond-accuracy metrics
+            if train_data_to_use is not None:
                 beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
-                    recommendations, self.train_data, item_features
+                    recommendations, train_data_to_use, None
                 )
-            
-            # Update results with beyond-accuracy metrics
-            results.update(beyond_accuracy_metrics)
+                # Update results with beyond-accuracy metrics
+                results.update(beyond_accuracy_metrics)
         
         # Update metadata with performance results
         self.metadata['performance'] = results
         
+        logger.info(f"Evaluation metrics: {results}")
         return results
     
     def _calculate_ndcg_at_k(self, test_data: pd.DataFrame, k: int) -> float:

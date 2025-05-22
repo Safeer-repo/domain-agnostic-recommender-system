@@ -28,7 +28,8 @@ def main():
                         required=True, help="Domain to tune model for")
     parser.add_argument("--dataset", required=True, help="Dataset name to tune model on")
     parser.add_argument("--metric", default="ndcg_at_k", 
-                        choices=["precision_at_k", "recall_at_k", "ndcg_at_k", "map_at_k", "rmse", "mae"],
+                        choices=["precision_at_k", "recall_at_k", "ndcg_at_k", "map_at_k", 
+                                "coverage", "novelty", "diversity", "rmse", "mae"],
                         help="Metric to optimize")
     parser.add_argument("--k", type=int, default=10, help="K value for evaluation metrics")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -113,8 +114,8 @@ def main():
                 # Train the model
                 model.fit(train_data)
                 
-                # Evaluate the model
-                eval_metrics = model.evaluate(test_data, k=args.k)
+                # Evaluate the model - PASS train_data for beyond-accuracy metrics
+                eval_metrics = model.evaluate(test_data, k=args.k, train_data=train_data)
                 
                 # Record current score
                 current_score = eval_metrics.get(args.metric, 0)

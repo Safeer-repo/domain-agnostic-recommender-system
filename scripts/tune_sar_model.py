@@ -125,7 +125,7 @@ def main():
                 model.fit(train_data)
                 
                 # Evaluate the model
-                eval_metrics = model.evaluate(test_data, k=args.k)
+                eval_metrics = model.evaluate(test_data, k=args.k, train_data=train_data)
                 
                 # Record current score
                 current_score = eval_metrics.get(args.metric, 0)

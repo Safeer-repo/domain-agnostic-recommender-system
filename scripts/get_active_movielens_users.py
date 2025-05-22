@@ -50,7 +50,7 @@ def get_active_users(min_ratings=20, num_users=5):
     return results
 
 if __name__ == "__main__":
-    active_users = get_active_users(min_ratings=50, num_users=5)
+    active_users = get_active_users(min_ratings=30, num_users=5)
     
     print("\nSelected active users:")
     for i, user in enumerate(active_users, 1):

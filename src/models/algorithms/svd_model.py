@@ -402,61 +402,144 @@ class SVDModel(BaseModel):
         
         return np.mean(ap_scores) if ap_scores else 0.0
     
-    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None) -> Dict[str, float]:
-            """
-            Evaluate the model's performance.
+    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None, train_data: Optional[pd.DataFrame] = None) -> Dict[str, float]:
+        """
+        Evaluate the model's performance.
+        
+        Args:
+            test_data: Test data with user_id, item_id, and rating columns
+            k: Number of recommendations to consider
+            metrics: List of metrics to compute
+            train_data: Training data (optional, uses stored train_data if not provided)
             
-            Args:
-                test_data: Test data with user_id, item_id, and rating columns
-                k: Number of recommendations to consider
-                metrics: List of metrics to compute
-                
-            Returns:
-                Dictionary of performance metrics
-            """
-            if not self.fitted:
-                raise ValueError("Model has not been fitted yet")
+        Returns:
+            Dictionary of performance metrics
+        """
+        if not self.fitted:
+            raise ValueError("Model has not been fitted yet")
+        
+        if metrics is None:
+            metrics = ['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 
+                    'coverage', 'novelty', 'diversity', 'rmse', 'mae']
+        
+        results = {}
+        
+        # Get unique users from test data
+        test_users = test_data['user_id'].unique()
+        
+        # SAMPLE USERS FOR EVALUATION - Add this to prevent hanging
+        sample_size = min(10000, len(test_users))  # Limit to 1000 users for efficiency
+        logger.info(f"Sampling {sample_size} users from {len(test_users)} for evaluation")
+        sampled_users = np.random.choice(test_users, size=sample_size, replace=False)
+        
+        # Generate recommendations for SAMPLED users only
+        all_recommendations = self.predict_batch(sampled_users, n=k)
+        
+        # Convert test data to a dictionary for easier lookup
+        test_dict = test_data.groupby('user_id')['item_id'].apply(list).to_dict()
+        
+        # Calculate ranking metrics
+        precision_scores = []
+        recall_scores = []
+        ndcg_scores = []
+        ap_scores = []
+        
+        for user_id in sampled_users:
+            if user_id not in test_dict:
+                continue
             
-            if metrics is None:
-                metrics = ['precision_at_k', 'recall_at_k', 'ndcg_at_k', 'map_at_k', 
-                        'coverage', 'novelty', 'diversity', 'rmse', 'mae']
+            actual_items = set(test_dict[user_id])
+            recommended_items = [item_id for item_id, _ in all_recommendations[user_id]]
             
-            results = {}
+            # Precision@k
+            hits = len(set(recommended_items) & actual_items)
+            precision_scores.append(hits / k)
             
-            # Compute standard accuracy metrics (this code already exists in your models)
-            # ...
+            # Recall@k
+            recall_scores.append(hits / len(actual_items) if actual_items else 0)
             
-            # Compute beyond-accuracy metrics (coverage, novelty, diversity)
-            if any(m in metrics for m in ['coverage', 'novelty', 'diversity']):
-                # Get a sample of users from the test data
-                test_users = test_data['user_id'].unique()
-                sample_size = min(100, len(test_users))  # Limit to 100 users for efficiency
-                sampled_users = list(np.random.choice(test_users, size=sample_size, replace=False))
+            # NDCG@k
+            dcg = 0.0
+            for i, item_id in enumerate(recommended_items):
+                if item_id in actual_items:
+                    dcg += 1.0 / np.log2(i + 2)
+            
+            idcg = sum([1.0 / np.log2(i + 2) for i in range(min(len(actual_items), k))])
+            ndcg_scores.append(dcg / idcg if idcg > 0 else 0)
+            
+            # Average Precision
+            if not recommended_items:
+                ap_scores.append(0.0)
+                continue
+            
+            hits_at_k = 0
+            precision_at_k = 0.0
+            for i, item_id in enumerate(recommended_items):
+                if item_id in actual_items:
+                    hits_at_k += 1
+                    precision_at_k += hits_at_k / (i + 1)
+            
+            ap_scores.append(precision_at_k / min(len(actual_items), k) if actual_items else 0)
+        
+        # Store accuracy metrics
+        if 'precision_at_k' in metrics:
+            results['precision_at_k'] = np.mean(precision_scores) if precision_scores else 0.0
+        if 'recall_at_k' in metrics:
+            results['recall_at_k'] = np.mean(recall_scores) if recall_scores else 0.0
+        if 'ndcg_at_k' in metrics:
+            results['ndcg_at_k'] = np.mean(ndcg_scores) if ndcg_scores else 0.0
+        if 'map_at_k' in metrics:
+            results['map_at_k'] = np.mean(ap_scores) if ap_scores else 0.0
+        
+        # Calculate rating prediction metrics (RMSE, MAE) if requested
+        if any(m in metrics for m in ['rmse', 'mae']):
+            predictions = []
+            actuals = []
+            
+            for _, row in test_data.iterrows():
+                user_id = row['user_id']
+                item_id = row['item_id']
+                actual_rating = row['rating']
                 
-                # Generate recommendations for these users
-                recommendations = self.predict_batch(sampled_users, n=k)
-                
-                # Import beyond-accuracy metrics function
-                from src.utils.evaluation_metrics import calculate_all_beyond_accuracy_metrics
-                
-                # Get item features for diversity calculation if available
-                item_features = None
-                if hasattr(self, 'item_features') and self.item_features is not None:
-                    # Convert from matrix to dictionary for diversity calculation
-                    # ... model-specific code to extract item features ...
-                
-                # Calculate beyond-accuracy metrics
-                    beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
-                        recommendations, self.train_data, item_features
-                    )
+                # Get predicted rating
+                if user_id in self.user_id_mapping and item_id in self.item_id_mapping:
+                    user_idx = self.user_id_mapping[user_id]
+                    item_idx = self.item_id_mapping[item_id]
+                    predicted_rating = (self.global_mean + 
+                                    self.user_biases[user_idx] + 
+                                    self.item_biases[item_idx] + 
+                                    np.dot(self.user_factors[user_idx], self.item_factors[item_idx]))
+                    predictions.append(predicted_rating)
+                    actuals.append(actual_rating)
+            
+            if predictions:
+                if 'rmse' in metrics:
+                    results['rmse'] = np.sqrt(mean_squared_error(actuals, predictions))
+                if 'mae' in metrics:
+                    results['mae'] = mean_absolute_error(actuals, predictions)
+        
+        # Calculate beyond-accuracy metrics
+        if any(m in metrics for m in ['coverage', 'novelty', 'diversity']):
+            from src.utils.evaluation_metrics import calculate_all_beyond_accuracy_metrics
+            
+            # Use provided train_data or the one stored during fitting
+            train_data_to_use = train_data if train_data is not None else self.train_data
+            
+            if train_data_to_use is not None:
+                # Calculate beyond-accuracy metrics using the same set of recommendations
+                beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
+                    all_recommendations, train_data_to_use, None
+                )
                 
                 # Update results with beyond-accuracy metrics
                 results.update(beyond_accuracy_metrics)
-            
-            # Update metadata with performance results
-            self.metadata['performance'] = results
-            
-            return results
+            else:
+                logger.warning("Training data not available for beyond-accuracy metrics")
+        
+        # Update metadata with performance results
+        self.metadata['performance'] = results
+        
+        return results
     
     def set_hyperparameters(self, **kwargs: Any) -> None:
         """

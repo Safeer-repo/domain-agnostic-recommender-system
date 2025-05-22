@@ -76,17 +76,19 @@ class RatingsStorage:
             DataFrame with correct data types
         """
         try:
-            # Define explicit data types to ensure proper comparisons
-            dtype = {
-                'user_id': 'int64',
-                'item_id': 'int64',
-                'rating': 'float64',
-                'source': 'str'
-            }
-            
-            # Read the CSV file
-            # Note: timestamp is handled separately to avoid type errors
+            # Read the CSV file first
             ratings = pd.read_csv(file_path)
+            
+            # Convert user_id and item_id to strings (works for both numeric and alphanumeric IDs)
+            if 'user_id' in ratings.columns:
+                ratings['user_id'] = ratings['user_id'].astype(str)
+            
+            if 'item_id' in ratings.columns:
+                ratings['item_id'] = ratings['item_id'].astype(str)
+            
+            # Convert rating to float
+            if 'rating' in ratings.columns:
+                ratings['rating'] = pd.to_numeric(ratings['rating'], errors='coerce').fillna(0.0).astype(float)
             
             # Convert timestamp column to integer explicitly
             if 'timestamp' in ratings.columns:
@@ -96,20 +98,12 @@ class RatingsStorage:
                     logger.warning(f"Some timestamp values in {file_path} couldn't be converted to integers. Using current time instead.")
                     ratings['timestamp'] = ratings['timestamp'].fillna(int(time.time()))
             
-            # Convert other columns to their proper types
-            for col, dtype_val in dtype.items():
-                if col in ratings.columns:
-                    if dtype_val == 'int64':
-                        ratings[col] = pd.to_numeric(ratings[col], errors='coerce').fillna(0).astype(int)
-                    elif dtype_val == 'float64':
-                        ratings[col] = pd.to_numeric(ratings[col], errors='coerce').fillna(0.0).astype(float)
-            
             return ratings
         except Exception as e:
             logger.error(f"Error reading {file_path}: {str(e)}")
             return pd.DataFrame(columns=["user_id", "item_id", "rating", "timestamp", "source"])
     
-    def store_rating(self, domain: str, dataset: str, user_id: int, 
+    def store_rating(self, domain: str, dataset: str, user_id: Union[str, int], 
                      item_id: int, rating: float, 
                      timestamp: Optional[int] = None,
                      source: str = "explicit") -> bool:
@@ -119,7 +113,7 @@ class RatingsStorage:
         Args:
             domain: Domain name
             dataset: Dataset name
-            user_id: ID of the user
+            user_id: ID of the user (can be string UUID or integer)
             item_id: ID of the item
             rating: Rating value
             timestamp: Optional timestamp (uses current time if None)
@@ -133,8 +127,8 @@ class RatingsStorage:
         
         # Create a DataFrame for the new rating with explicit types
         rating_df = pd.DataFrame({
-            "user_id": [user_id],
-            "item_id": [int(item_id)],
+            "user_id": [str(user_id)],  # Always store as string
+            "item_id": [str(item_id)],  # Always store as string (both numeric and alphanumeric)
             "rating": [float(rating)],
             "timestamp": [int(timestamp)],
             "source": [str(source)]
@@ -198,8 +192,8 @@ class RatingsStorage:
                 
             # Ensure proper types
             processed_rating = {
-                'user_id': int(rating_data['user_id']),
-                'item_id': int(rating_data['item_id']),
+                'user_id': str(rating_data['user_id']),  # Always store as string
+                'item_id': str(rating_data['item_id']),  # Always store as string (both numeric and alphanumeric)
                 'rating': float(rating_data['rating']),
                 'timestamp': int(rating_data['timestamp']),
                 'source': str(rating_data['source'])
@@ -365,15 +359,28 @@ class RatingsStorage:
         logger.info(f"Removed {total_removed} processed ratings for {domain}/{dataset}")
         return total_removed
     
-    def has_user_ratings(self, domain: str, dataset: str, user_id: str) -> bool:
-        """Check if a user has any ratings"""
+    def has_user_ratings(self, domain: str, dataset: str, user_id: Union[str, int]) -> bool:
+        """
+        Check if a user has any ratings
+        
+        Args:
+            domain: Domain name
+            dataset: Dataset name
+            user_id: User ID (string UUID or integer)
+            
+        Returns:
+            Boolean indicating if the user has ratings
+        """
+        # Convert user_id to string for consistent comparison
+        user_id_str = str(user_id)
+        
         # First check in the main dataset
         dataset_path = os.path.join(self.data_dir, "datasets", domain, dataset, "ratings.csv")
         if os.path.exists(dataset_path):
             try:
                 import pandas as pd
                 ratings_df = pd.read_csv(dataset_path)
-                if 'user_id' in ratings_df.columns and str(user_id) in ratings_df['user_id'].astype(str).values:
+                if 'user_id' in ratings_df.columns and user_id_str in ratings_df['user_id'].astype(str).values:
                     return True
             except Exception as e:
                 logger.error(f"Error checking user ratings in dataset: {str(e)}")
@@ -386,7 +393,7 @@ class RatingsStorage:
                 try:
                     import pandas as pd
                     ratings_df = pd.read_csv(os.path.join(new_ratings_path, file))
-                    if 'user_id' in ratings_df.columns and str(user_id) in ratings_df['user_id'].astype(str).values:
+                    if 'user_id' in ratings_df.columns and user_id_str in ratings_df['user_id'].astype(str).values:
                         return True
                 except Exception as e:
                     logger.error(f"Error checking user ratings in {file}: {str(e)}")

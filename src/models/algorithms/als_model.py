@@ -60,6 +60,7 @@ class ALSModel(BaseModel):
         # Store features for later use
         self.user_features = user_features
         self.item_features = item_features
+        self.train_data = train_data  # Store training data for evaluation
         
         # Create user and item indices
         self._create_indices(train_data)
@@ -179,7 +180,7 @@ class ALSModel(BaseModel):
         
         return recommendations
     
-    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None) -> Dict[str, float]:
+    def evaluate(self, test_data: pd.DataFrame, k: int = 10, metrics: Optional[List[str]] = None, train_data: Optional[pd.DataFrame] = None) -> Dict[str, float]:
         """
         Evaluate the model's performance.
         
@@ -187,6 +188,7 @@ class ALSModel(BaseModel):
             test_data: Test data with user_id, item_id, and rating columns
             k: Number of recommendations to consider
             metrics: List of metrics to compute
+            train_data: Training data (if not stored as an attribute)
             
         Returns:
             Dictionary of performance metrics
@@ -199,40 +201,138 @@ class ALSModel(BaseModel):
                     'coverage', 'novelty', 'diversity', 'rmse', 'mae']
         
         results = {}
-        beyond_accuracy_metrics = {}
         
-        # Compute standard accuracy metrics (this code already exists in your models)
-        # ...
+        # Use provided train_data or stored attribute
+        train_data_to_use = train_data if train_data is not None else getattr(self, 'train_data', None)
         
-        # Compute beyond-accuracy metrics (coverage, novelty, diversity)
-        if any(m in metrics for m in ['coverage', 'novelty', 'diversity']):
-            # Get a sample of users from the test data
-            test_users = test_data['user_id'].unique()
-            sample_size = min(100, len(test_users))  # Limit to 100 users for efficiency
-            sampled_users = list(np.random.choice(test_users, size=sample_size, replace=False))
-            
-            # Generate recommendations for these users
-            recommendations = self.predict_batch(sampled_users, n=k)
-            
-            # Import beyond-accuracy metrics function
-            from src.utils.evaluation_metrics import calculate_all_beyond_accuracy_metrics
-            
+        if train_data_to_use is None:
+            logger.warning("Training data not available for evaluation metrics. Some metrics may be skipped.")
+        
+        # Sample users for evaluation - limit the number to improve performance
+        test_users = test_data['user_id'].unique()
+        sample_size = min(1000, len(test_users))  # Limit to 1000 users for efficiency
+        sampled_users = list(np.random.choice(test_users, size=sample_size, replace=False))
+        
+        # Generate recommendations for these users
+        recommendations = {}
+        for user_id in sampled_users:
+            if user_id in self.user_index:
+                user_recs = self.predict(user_id, n=k)
+                recommendations[user_id] = user_recs
+        
+        # Get actual items that users interacted with in the test set
+        actual_items = {}
+        for user_id in sampled_users:
+            user_test = test_data[test_data['user_id'] == user_id]
+            actual_items[user_id] = user_test['item_id'].tolist()
+        
+        # Import evaluation metrics
+        try:
+            from src.utils.evaluation_metrics import (
+                calculate_precision_at_k,
+                calculate_recall_at_k,
+                calculate_ndcg_at_k,
+                calculate_map_at_k,
+                calculate_all_beyond_accuracy_metrics
+            )
+            logger.info("Successfully imported evaluation metrics")
+        except ImportError as e:
+            logger.error(f"Error importing evaluation metrics: {str(e)}")
+            return results
+        
+        # Calculate each standard metric if requested
+        if 'precision_at_k' in metrics:
+            try:
+                results['precision_at_k'] = calculate_precision_at_k(recommendations, actual_items, k)
+            except Exception as e:
+                logger.error(f"Error calculating precision@{k}: {str(e)}")
+        
+        if 'recall_at_k' in metrics:
+            try:
+                results['recall_at_k'] = calculate_recall_at_k(recommendations, actual_items, k)
+            except Exception as e:
+                logger.error(f"Error calculating recall@{k}: {str(e)}")
+        
+        if 'ndcg_at_k' in metrics:
+            try:
+                results['ndcg_at_k'] = calculate_ndcg_at_k(recommendations, actual_items, k)
+            except Exception as e:
+                logger.error(f"Error calculating ndcg@{k}: {str(e)}")
+        
+        # Calculate MAP@K with detailed debugging
+        if 'map_at_k' in metrics:
+            try:
+                logger.info("Attempting to calculate MAP@K...")
+                if len(recommendations) == 0:
+                    logger.warning("Empty recommendations dictionary")
+                    results['map_at_k'] = 0.0
+                else:
+                    logger.info(f"Recommendations sample (first user): {list(recommendations.items())[0]}")
+                    
+                if len(actual_items) == 0:
+                    logger.warning("Empty actual_items dictionary")
+                    results['map_at_k'] = 0.0
+                else:
+                    logger.info(f"Actual items sample (first user): {list(actual_items.items())[0]}")
+                
+                # Calculate MAP@K directly and add to results
+                map_value = calculate_map_at_k(recommendations, actual_items, k)
+                logger.info(f"MAP@{k} calculated successfully: {map_value}")
+                results['map_at_k'] = map_value
+            except Exception as e:
+                logger.error(f"Error calculating MAP@{k}: {str(e)}")
+                import traceback
+                logger.error(f"MAP@K traceback: {traceback.format_exc()}")
+                results['map_at_k'] = 0.0  # Default value
+        
+        # Calculate beyond-accuracy metrics
+        if any(m in metrics for m in ['coverage', 'novelty', 'diversity']) and train_data_to_use is not None:
             # Get item features for diversity calculation if available
-            item_features = None
+            item_features_dict = None
             if hasattr(self, 'item_features') and self.item_features is not None:
-                # Convert from matrix to dictionary for diversity calculation
-                # ... model-specific code to extract item features ...
+                try:
+                    # Convert item features to a dictionary format for diversity calculation
+                    logger.info("Preparing item features for diversity calculation")
+                    item_features_dict = {}
+                    for idx, row in self.item_features.iterrows():
+                        item_id = row['item_id']
+                        features = row.drop('item_id').values
+                        item_features_dict[item_id] = features
+                    logger.info(f"Item features dictionary created with {len(item_features_dict)} items")
+                except Exception as e:
+                    logger.error(f"Error preparing item features: {str(e)}")
+                    item_features_dict = None
             
             # Calculate beyond-accuracy metrics
+            try:
+                logger.info("Calculating beyond-accuracy metrics (coverage, novelty, diversity)")
                 beyond_accuracy_metrics = calculate_all_beyond_accuracy_metrics(
-                    recommendations, self.train_data, item_features
+                    recommendations, train_data_to_use, item_features_dict
                 )
-            
-            # Update results with beyond-accuracy metrics
-            results.update(beyond_accuracy_metrics)
+                logger.info(f"Beyond-accuracy metrics calculated: {beyond_accuracy_metrics}")
+                
+                # Update results with beyond-accuracy metrics
+                results.update(beyond_accuracy_metrics)
+                
+                # Make sure MAP@K is also added to the results if not already there
+                if 'map_at_k' in metrics and 'map_at_k' not in results and 'map_at_k' not in beyond_accuracy_metrics:
+                    logger.info("Adding MAP@K directly to results")
+                    try:
+                        results['map_at_k'] = calculate_map_at_k(recommendations, actual_items, k)
+                        logger.info(f"MAP@{k} added: {results['map_at_k']}")
+                    except Exception as e:
+                        logger.error(f"Error adding MAP@K to results: {str(e)}")
+                        results['map_at_k'] = 0.0
+            except Exception as e:
+                logger.error(f"Error calculating beyond-accuracy metrics: {str(e)}")
+                import traceback
+                logger.error(f"Beyond-accuracy metrics traceback: {traceback.format_exc()}")
         
         # Update metadata with performance results
         self.metadata['performance'] = results
+        
+        # Log the final results
+        logger.info(f"Final evaluation metrics: {results}")
         
         return results
     
