@@ -1,0 +1,96 @@
+2. Instructions for Replit to Update the Frontend
+Tell Replit to update the frontend with these changes:
+
+Create a new API function in the frontend API service file:
+
+javascript// Add this to your API service
+async function getTrendingItems(domain, dataset, count = 10) {
+  try {
+    const userId = localStorage.getItem('user_id');
+    const token = localStorage.getItem('token');
+    
+    if (!userId || !token) {
+      throw new Error('Not authenticated');
+    }
+    
+    // Make request to trending items endpoint
+    const response = await fetch(`${API_BASE_URL}/recommendations/trending`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        domain: domain,
+        dataset: dataset,
+        count: count
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Failed to fetch trending items:', errorData);
+      throw new Error(errorData.detail || 'Failed to fetch trending items');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching trending items:', error);
+    throw error;
+  }
+}
+
+Replace the mock trending items function with this real API call:
+
+javascript// Replace the existing generateTrendingItems function with this:
+async function loadTrendingItems() {
+  try {
+    setTrendingLoading(true);
+    
+    // Call the API with the same domain/dataset used for recommendations
+    const response = await getTrendingItems(currentDomain, currentDataset, 10);
+    
+    if (response.trending_items && response.trending_items.length > 0) {
+      // Transform the API response into the format your UI expects
+      const trendingItems = response.trending_items.map((item, index) => {
+        // Get random mock data for visualization since API only returns IDs
+        const randomIndex = Math.floor(Math.random() * MOCK_ITEMS[currentDomain].names.length);
+        return {
+          ...item,
+          name: MOCK_ITEMS[currentDomain].names[randomIndex],
+          image: MOCK_ITEMS[currentDomain].images[randomIndex % MOCK_ITEMS[currentDomain].images.length]
+        };
+      });
+      
+      setTrendingItems(trendingItems);
+    } else {
+      // Fallback to mock data if API returns empty results
+      const mockTrending = generateMockTrendingItems(currentDomain, 10);
+      setTrendingItems(mockTrending);
+    }
+  } catch (error) {
+    console.error('Failed to load trending items:', error);
+    // Fallback to mock data on error
+    const mockTrending = generateMockTrendingItems(currentDomain, 10);
+    setTrendingItems(mockTrending);
+  } finally {
+    setTrendingLoading(false);
+  }
+}
+
+// Keep the original function as fallback
+function generateMockTrendingItems(domain, count = 5) {
+  return Array.from({ length: count }, (_, i) => {
+    const trendingId = `trending-${domain}-${i}-${Date.now().toString().substring(9)}`;
+    return generateMockItem(trendingId, domain);
+  });
+}
+
+Call the new trending items loading function in the dashboard initialization:
+
+javascriptuseEffect(() => {
+  // After user auth and domain determination
+  loadRecommendations();
+  loadTrendingItems(); // Add this line to load real trending items
+}, [currentDomain, currentDataset]);

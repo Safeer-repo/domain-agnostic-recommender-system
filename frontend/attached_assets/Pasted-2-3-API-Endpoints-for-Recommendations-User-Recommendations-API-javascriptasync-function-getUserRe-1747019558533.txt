@@ -1,0 +1,80 @@
+2.3: API Endpoints for Recommendations
+
+User Recommendations API:
+javascriptasync function getUserRecommendations(userId, domain, dataset, count = 10) {
+  // CRITICAL: domain and dataset must match and be consistent
+  // entertainment -> movielens
+  // ecommerce -> amazon
+  return request('/recommendations/user', 'POST', {
+    user_id: userId,  // MUST be string format
+    domain: domain,   // MUST match user preference
+    dataset: dataset, // MUST match domain
+    count: count
+  });
+}
+
+Similar Items API:
+javascriptasync function getSimilarItems(itemId, domain, dataset, count = 5) {
+  // CRITICAL: domain and dataset must match and be consistent
+  return request('/recommendations/similar', 'POST', {
+    item_id: itemId,    // Can be string or number depending on domain
+    domain: domain,     // MUST match item domain
+    dataset: dataset,   // MUST match domain
+    count: count
+  });
+}
+
+Rating Submission API:
+javascriptasync function submitRating(userId, itemId, rating, domain, dataset) {
+  // CRITICAL: domain and dataset must match and be consistent
+  return request('/user/rate', 'POST', {
+    user_id: userId,    // MUST be string
+    item_id: itemId,    // Can be string or number depending on domain
+    rating: rating,     // Numeric value (1-5)
+    domain: domain,     // MUST match user preference
+    dataset: dataset    // MUST match domain
+  });
+}
+
+
+2.4: Recommendation Flow Implementation
+
+Load user recommendations:
+javascriptasync function loadRecommendations() {
+  try {
+    // Show loading state
+    showLoadingState('recommendations');
+    
+    // CRITICAL: Use the stored domain and dataset from user preferences
+    const userId = localStorage.getItem('user_id');
+    
+    console.log(`Loading recommendations for user ${userId} in domain ${currentDomain}, dataset ${currentDataset}`);
+    
+    // Call the API
+    const response = await getUserRecommendations(userId, currentDomain, currentDataset);
+    
+    // Hide loading state
+    hideLoadingState('recommendations');
+    
+    // Process and display recommendations
+    displayRecommendations(response.data.recommendations);
+  } catch (error) {
+    console.error('Failed to load recommendations:', error);
+    showErrorMessage('Failed to load recommendations. Please try again later.');
+    
+    // Fallback to dummy/mock recommendations
+    displayMockRecommendations();
+  }
+}
+
+SPECIAL ATTENTION: The most common error is a 422 Unprocessable Entity error on the recommendations endpoint. To avoid this:
+
+Ensure user_id is passed as a string, not a number
+Ensure domain and dataset are consistent pairs:
+
+domain: "entertainment" → dataset: "movielens"
+domain: "ecommerce" → dataset: "amazon"
+
+
+Log the exact request payload before sending for debugging
+Double-check all field names match exactly (user_id, not userId)

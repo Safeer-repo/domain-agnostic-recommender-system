@@ -1,0 +1,71 @@
+Domain Agnostic Recommender System - Dashboard & Recommendations Implementation
+Now that you've successfully implemented authentication, login, and user creation, let's proceed with implementing the dashboard and recommendation features. This is where the domain-specific aspects of our system become crucial.
+Step 2: Dashboard & Recommendations Implementation
+2.1: Dashboard Structure & Components
+Your dashboard should include the following key components:
+
+Welcome Header: Display the user's name and a welcome message.
+Top Picks for You Section:
+
+This section displays personalized recommendations from the API
+These are tailored to the user based on their past ratings and preferences
+Fetch these from the /recommendations/user endpoint
+Each recommendation should be clickable to view details
+
+
+Trending Now Section:
+
+This section shows popular items in the user's chosen domain
+Since our API doesn't have a dedicated endpoint for trending items, use mock data
+This data should still be domain-specific (movies vs products)
+Each trending item should also be clickable
+
+
+Item Details View:
+
+When a user clicks on any item (recommendation or trending), show detailed information
+This should appear prominently, perhaps as a modal or a dedicated section
+Include larger image, name, and a rating interface
+Below the details, show "Similar Items" fetched from the API
+
+
+Similar Items Section:
+
+This appears within the Item Details View
+Shows items similar to the selected item
+Fetch these from the /recommendations/similar endpoint
+Display as a horizontal row of smaller item cards
+Each similar item should also be clickable to view its details
+
+
+
+2.2: Domain & Dataset Management
+
+Extract and store the user's domain preferences:
+javascript// Extract from user profile
+let currentDomain = '';
+let currentDataset = '';
+
+if (userProfile.domain_preferences) {
+  const domains = Object.keys(userProfile.domain_preferences);
+  if (domains.length > 0) {
+    // Get the first domain with non-empty dataset array
+    for (const domain of domains) {
+      if (userProfile.domain_preferences[domain].length > 0) {
+        currentDomain = domain;
+        currentDataset = userProfile.domain_preferences[domain][0];
+        break;
+      }
+    }
+  }
+}
+
+// Fallback defaults if somehow not set
+if (!currentDomain || !currentDataset) {
+  currentDomain = 'entertainment';
+  currentDataset = 'movielens';
+}
+
+console.log(`User domain: ${currentDomain}, dataset: ${currentDataset}`);
+
+CRITICAL: These domain and dataset values must be used consistently in all API calls.

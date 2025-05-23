@@ -1,0 +1,123 @@
+2.5: Similar Items Flow
+When a user clicks on an item:
+
+Display the item details prominently
+Load similar items based on the selected item:
+javascriptasync function loadSimilarItems(itemId) {
+  try {
+    // Show loading state
+    showLoadingState('similar-items');
+    
+    // CRITICAL: Use the same domain and dataset
+    const response = await getSimilarItems(itemId, currentDomain, currentDataset);
+    
+    // Hide loading state
+    hideLoadingState('similar-items');
+    
+    // Display similar items
+    displaySimilarItems(response.data.similar_items);
+  } catch (error) {
+    console.error('Failed to load similar items:', error);
+    showErrorMessage('Failed to load similar items');
+    
+    // Fallback to mock similar items
+    displayMockSimilarItems();
+  }
+}
+
+
+2.6: Rating Submission Flow
+When a user rates an item:
+
+Capture the rating value (1-5)
+Submit the rating to the API:
+javascriptasync function submitUserRating(itemId, rating) {
+  try {
+    const userId = localStorage.getItem('user_id');
+    
+    // CRITICAL: Use the correct domain and dataset
+    await submitRating(userId, itemId, rating, currentDomain, currentDataset);
+    
+    // Show success notification
+    showNotification('Rating submitted successfully!');
+    
+    // Optionally, refresh recommendations after rating
+    // await loadRecommendations();
+  } catch (error) {
+    console.error('Failed to submit rating:', error);
+    showNotification('Failed to submit rating. Please try again.', 'error');
+  }
+}
+
+
+2.7: Mock Data for Visualization
+Since the API only returns item IDs without names or images, create mock data mappings:
+javascriptconst MOCK_ITEMS = {
+  entertainment: {
+    names: ["The Shawshank Redemption", "The Godfather", /* more movie names */],
+    images: ["https://example.com/movie1.jpg", "https://example.com/movie2.jpg", /* more URLs */]
+  },
+  ecommerce: {
+    names: ["Wireless Headphones", "Smart Watch", /* more product names */],
+    images: ["https://example.com/product1.jpg", "https://example.com/product2.jpg", /* more URLs */]
+  }
+};
+Use this mock data to enhance the user experience by providing names and images for recommendations and similar items.
+2.8: Dashboard Initialization Flow
+Bring everything together with an initialization function:
+javascriptasync function initDashboard() {
+  try {
+    // Check if user is authenticated
+    if (!isAuthenticated()) {
+      navigateTo('/login');
+      return;
+    }
+    
+    // Get user profile to determine domain preferences
+    const userProfile = await getUserProfile();
+    
+    // CRITICAL: Extract domain and dataset from user preferences
+    extractDomainPreferences(userProfile);
+    
+    console.log(`Dashboard initialized with domain: ${currentDomain}, dataset: ${currentDataset}`);
+    
+    // Load recommendations
+    await loadRecommendations();
+    
+    // Load trending items (mock data)
+    loadTrendingItems();
+    
+  } catch (error) {
+    console.error('Failed to initialize dashboard:', error);
+    showErrorMessage('Failed to load dashboard. Please try again later.');
+  }
+}
+IMPORTANT REMINDERS:
+
+Dashboard Sections and Layout:
+
+"Top Picks for You" shows personalized API recommendations
+"Trending Now" shows mock popular items
+Item details view appears when any item is clicked
+Similar items appear inside the item details view
+
+
+Domain-Dataset Pairs: Always use these consistent pairs:
+
+domain: "entertainment" → dataset: "movielens"
+domain: "ecommerce" → dataset: "amazon"
+
+
+API Response Structure:
+
+User recommendations: Array of objects with item_id and score
+Similar items: Array of objects with item_id and similarity
+These need to be enriched with mock names and images
+
+
+User ID as String: Always pass user_id as a string in all API calls.
+Request Format Precision: Double-check all API request formats match exactly what the backend expects.
+Error Handling: Implement proper error handling and fallbacks for API failures.
+Domain-Specific Experience: Adapt the visual presentation based on user's selected domain.
+
+By implementing this functionality with careful attention to domain and dataset consistency, you'll create a robust dashboard that delivers personalized recommendations to users across different domains.

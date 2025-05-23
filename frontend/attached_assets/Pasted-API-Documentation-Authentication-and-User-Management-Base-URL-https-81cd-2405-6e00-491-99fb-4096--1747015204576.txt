@@ -1,0 +1,121 @@
+API Documentation: Authentication and User Management
+Base URL
+https://81cd-2405-6e00-491-99fb-4096-556-1786-b75c.ngrok-free.app
+Authentication Endpoints
+Login User
+Authenticates a user and returns an access token.
+Endpoint: POST /user/login
+Request Body:
+json{
+  "username": "user123",
+  "password": "password123"
+}
+Response:
+json{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "user_id": "c210ca32-ad7c-41a5-a806-71c95dfce5ec",
+  "username": "user123"
+}
+Status Codes:
+
+200: Login successful
+401: Invalid credentials
+
+Create User Account
+Registers a new user with the system.
+Endpoint: POST /user/create
+Request Body:
+json{
+  "username": "user123",
+  "email": "user@example.com",
+  "password": "password123",
+  "domain_preferences": {
+    "entertainment": ["movielens"],
+    "ecommerce": []
+  }
+}
+Notes:
+
+Only one domain can be active at a time
+If selecting "entertainment", the "entertainment" array should contain "movielens" and "ecommerce" should be empty
+If selecting "ecommerce", the "ecommerce" array should contain "amazon" and "entertainment" should be empty
+
+Response:
+json{
+  "user_id": "c210ca32-ad7c-41a5-a806-71c95dfce5ec",
+  "username": "user123",
+  "email": "user@example.com",
+  "created_at": 1620000000,
+  "last_updated": 1620000000,
+  "domain_preferences": {
+    "entertainment": ["movielens"],
+    "ecommerce": []
+  },
+  "metadata": {}
+}
+Status Codes:
+
+200: Registration successful
+400: Username or email already exists
+422: Validation error (check request format)
+
+Get User Profile
+Retrieves the current user's profile information.
+Endpoint: GET /user/me
+Headers:
+Authorization: Bearer <access_token>
+Response:
+json{
+  "user_id": "c210ca32-ad7c-41a5-a806-71c95dfce5ec",
+  "username": "user123",
+  "email": "user@example.com",
+  "created_at": 1620000000,
+  "last_updated": 1620000000,
+  "domain_preferences": {
+    "entertainment": ["movielens"]
+  },
+  "metadata": {
+    "original_dataset_id": "123"
+  }
+}
+Status Codes:
+
+200: Profile retrieved successfully
+401: Unauthorized (invalid or expired token)
+
+Implementation Tips
+Authentication Headers
+For authenticated endpoints, include the JWT token in the Authorization header:
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Error Response Format
+Error responses typically have this structure:
+json{
+  "detail": "Error message describing the issue"
+}
+Domain Preferences Format
+Always send domain preferences in exactly this format:
+json"domain_preferences": {
+  "entertainment": ["movielens"],
+  "ecommerce": []
+}
+or
+json"domain_preferences": {
+  "entertainment": [],
+  "ecommerce": ["amazon"]
+}
+Authentication Flow
+
+Register user with appropriate domain preferences
+Login user to obtain access token
+Store token in localStorage
+Include token in Authorization header for all subsequent requests
+Get user profile to retrieve domain preferences for recommendations
+
+Common HTTP Status Codes
+
+200: Success
+400: Bad Request (invalid parameters)
+401: Unauthorized (missing or invalid token)
+422: Unprocessable Entity (validation error)
+500: Internal Server Error (backend issue)
